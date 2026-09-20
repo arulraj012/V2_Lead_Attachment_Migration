@@ -1,0 +1,59 @@
+{
+    "name": "v2-lead-attachment-migration",
+    "version": "1.0.0",
+    "description": "SAP CAP application for migrating C4C V1 Lead Attachments to SAP Sales/Service Cloud V2",
+    "repository": "",
+    "license": "UNLICENSED",
+    "private": true,
+    "engines": {
+        "node": ">=20"
+    },
+    "scripts": {
+        "start": "cds-serve",
+        "watch": "cds watch",
+        "build": "cds build --production",
+        "build:ui": "cd app/migration-ui && npm run build",
+        "build:mta": "mbt build",
+        "deploy": "cds deploy --to hana",
+        "deploy:cf": "cf deploy $(ls -t *.mtar | head -1)"
+    },
+    "dependencies": {
+        "@cap-js/hana": "^1.9.2",
+        "@sap/cds": "^8",
+        "@sap/hana-client": "^2",
+        "@sap/xssec": "^4.15.0",
+        "express": "^4",
+        "node-cron": "^3.0.3",
+        "node-fetch": "^3.3.2"
+    },
+    "devDependencies": {
+        "@cap-js/sqlite": "^1",
+        "@sap/cds-dk": "^8",
+        "tsx": "^4.23.12",
+        "typescript": "^5.8.3"
+    },
+    "cds": {
+        "requires": {
+            "db": {
+                "kind": "hana"
+            },
+            "[development]": {
+                "db": {
+                    "kind": "sqlite",
+                    "credentials": {
+                        "database": ":memory:"
+                    }
+                },
+                "auth": {
+                    "kind": "mocked",
+                    "users": {
+                        "admin": {
+                            "password": "admin",
+                            "roles": ["authenticated-user", "MigrationJob"]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

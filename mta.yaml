@@ -1,0 +1,93 @@
+_schema-version: "3.1"
+ID: v2-lead-attachment-migration
+version: 1.0.0
+description: SAP CAP application for migrating C4C V1 Lead Attachments to V2
+
+parameters:
+  enable-parallel-deployments: true
+
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm ci
+        - npx cds build --production
+
+modules:
+  # CAP Backend
+  - name: v2-lead-attachment-migration-srv
+    type: nodejs
+    path: gen/srv
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 512M
+      disk-quota: 512M
+      instances: 1
+    build-parameters:
+      builder: npm
+      ignore:
+        - .env
+    requires:
+      - name: v2-lead-attachment-migration-hana
+      - name: v2-lead-attachment-migration-xsuaa
+      - name: v2-lead-attachment-migration-destination
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    properties:
+      MIGRATION_SCHEDULER_ENABLED: false
+      V1_DESTINATION_NAME: V1_C4C
+      V2_DESTINATION_NAME: V2_SSCV2
+      NODE_ENV: production
+
+  # HANA DB Deployer
+  - name: v2-lead-attachment-migration-db-deployer
+    type: nodejs
+    path: gen/db
+    parameters:
+      buildpack: nodejs_buildpack
+      memory: 256M
+      disk-quota: 512M
+      no-route: true
+      no-start: true
+      tasks:
+        - name: deploy-to-hana
+          command: npm start
+          memory: 256M
+          disk-quota: 512M
+    build-parameters:
+      ignore:
+        - node_modules/
+    requires:
+      - name: v2-lead-attachment-migration-hana
+        properties:
+          TARGET_CONTAINER: ~{hdi-service-name}
+
+resources:
+  # HANA Cloud / HDI
+  - name: v2-lead-attachment-migration-hana
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+    properties:
+      hdi-service-name: ${service-name}
+
+  # XSUAA
+  - name: v2-lead-attachment-migration-xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: ./xs-security.json
+      config:
+        xsappname: v2-lead-attachment-migration-${org}
+        tenant-mode: dedicated
+
+  # Destination Service
+  - name: v2-lead-attachment-migration-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite

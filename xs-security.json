@@ -1,0 +1,47 @@
+{
+  "xsappname": "v2-lead-attachment-migration",
+  "tenant-mode": "dedicated",
+  "description": "V2 Lead Attachment Migration Tool Security Descriptor",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.admin",
+      "description": "Full access to migration tool via Admin UI"
+    },
+    {
+      "name": "$XSAPPNAME.MigrationJob",
+      "description": "CPI / Job Scheduling Service scope - trigger migration job"
+    }
+  ],
+  "authorities": [
+    "$XSAPPNAME.MigrationJob"
+  ],
+  "role-templates": [
+    {
+      "name": "MigrationAdmin",
+      "description": "Migration Tool Administrator",
+      "scope-references": ["$XSAPPNAME.admin"]
+    },
+    {
+      "name": "MigrationJob",
+      "description": "Migration Job Trigger (CPI technical user)",
+      "scope-references": ["$XSAPPNAME.MigrationJob"]
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "LeadMigrationAdministrator",
+      "description": "Full access to the V2 Lead Attachment Migration Tool",
+      "role-template-references": ["$XSAPPNAME.MigrationAdmin"]
+    },
+    {
+      "name": "LeadMigrationJobTrigger",
+      "description": "CPI technical user role - run migration job only",
+      "role-template-references": ["$XSAPPNAME.MigrationJob"]
+    }
+  ],
+  "oauth2-configuration": {
+    "token-validity": 43200,
+    "refresh-token-validity": 1209600,
+    "redirect-uris": ["https://*.*.hana.ondemand.com/**"]
+  }
+}
