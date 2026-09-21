@@ -64,6 +64,51 @@ modules:
         properties:
           TARGET_CONTAINER: ~{hdi-service-name}
 
+  # React Admin UI
+  - name: v2-lead-attachment-migration-ui
+    type: html5
+    path: app/migration-ui
+    build-parameters:
+      builder: custom
+      commands:
+        - npm ci
+        - npm run build
+      supported-platforms: []
+      build-result: dist
+
+  # UI Deployer (HTML5 App Repository)
+  - name: v2-lead-attachment-migration-ui-deployer
+    type: com.sap.application.content
+    path: .
+    requires:
+      - name: v2-lead-attachment-migration-html5-repo-host
+        parameters:
+          content-target: true
+    build-parameters:
+      build-result: resources
+      requires:
+        - name: v2-lead-attachment-migration-ui
+          artifacts:
+            - ./*
+          target-path: resources/v2leadattachmentmigration
+
+  # App Router (Managed Approuter)
+  - name: v2-lead-attachment-migration-approuter
+    type: approuter.nodejs
+    path: app/
+    parameters:
+      disk-quota: 256M
+      memory: 256M
+    requires:
+      - name: v2-lead-attachment-migration-xsuaa
+      - name: v2-lead-attachment-migration-html5-repo-rt
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+
 resources:
   # HANA Cloud / HDI
   - name: v2-lead-attachment-migration-hana
@@ -91,3 +136,17 @@ resources:
     parameters:
       service: destination
       service-plan: lite
+
+  # HTML5 Application Repository Host
+  - name: v2-lead-attachment-migration-html5-repo-host
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-host
+
+  # HTML5 Application Repository Runtime
+  - name: v2-lead-attachment-migration-html5-repo-rt
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: html5-apps-repo
+      service-plan: app-runtime

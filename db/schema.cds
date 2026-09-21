@@ -83,4 +83,4 @@ entity LeadAttachmentQueue : timestamped, attachmentMeta {
 // VIEWS
 view UnresolvedFailedAttachments as select from LeadAttachmentFailedRecord { * } where resolvedAt is null;
 view PendingAttachments as select from LeadAttachmentQueue { * } where status = 'PENDING' order by priority asc, createdAt asc;
-view LeadAttachmentSummary as select from LeadMigrationMapping { v1LeadDisplayId, v2LeadDisplayId, attachmentsMigrated, attachmentsPending, attachmentsFailed };
+view LeadAttachmentSummary as select from LeadMigrationMapping { key v1LeadObjectID, v1LeadDisplayId, v2LeadDisplayId, attachmentsMigrated, attachmentsPending, attachmentsFailed };

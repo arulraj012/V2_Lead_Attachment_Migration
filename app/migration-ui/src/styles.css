@@ -1,0 +1,44 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--sapFontFamily);
+  background-color: var(--sapBackgroundColor);
+  color: var(--sapTextColor);
+}
+
+/* Custom scrollbar for better UX */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--sapBackgroundColor);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--sapContent_ForegroundBorderColor);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sapContent_ContrastFocusColor);
+}
+
+/* Table styling improvements */
+ui5-table {
+  width: 100%;
+}
+
+ui5-table-cell {
+  vertical-align: middle;
+}
