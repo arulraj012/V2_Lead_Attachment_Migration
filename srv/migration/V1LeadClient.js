@@ -40,7 +40,7 @@ class V1LeadClient {
         // V1 C4C Lead API property names (from API documentation)
         const selectFields = 'ObjectID,ID,Name,UserStatusCode,AccountPartyID,AccountPartyName,OwnerPartyID,CreationDateTime';
         const queryParams = new URLSearchParams({
-            '$format': 'json', '$select': selectFields, '$orderby': 'CreationDateTime desc'
+            '$format': 'json', '$select': selectFields, '$orderby': 'CreationDateTime asc,ID asc'  // Ascending for cursor-based pagination
         });
         if (filters.length > 0) queryParams.set('$filter', filters.join(' and '));
         if (filterOptions.maxRecords) queryParams.set('$top', filterOptions.maxRecords.toString());
@@ -75,6 +75,109 @@ class V1LeadClient {
 
         const data = await response.json();
         return data.d?.results || [];
+    }
+
+    /**
+     * Fetch leads using keyset pagination (cursor-based)
+     * More efficient than offset pagination for large datasets
+     * 
+     * @param {Object} options - Pagination options
+     * @param {string} options.createdFrom - Start date (YYYY-MM-DD)
+     * @param {string} options.createdTo - End date (YYYY-MM-DD)
+     * @param {string} options.afterLeadId - Cursor: last processed Lead ID
+     * @param {string} options.afterCreationDateTime - Cursor: last processed CreationDateTime
+     * @param {number} options.limit - Max leads to fetch (default 50)
+     * @returns {Promise<Array>} Leads after the cursor position
+     */
+    async fetchLeadsAfterCursor(options = {}) {
+        const { baseUrl, user, password } = await this._getCredentials();
+        this.baseUrl = baseUrl; this.user = user; this.password = password;
+
+        const { createdFrom, createdTo, afterLeadId, afterCreationDateTime, limit = 50 } = options;
+
+        // Build keyset pagination filter
+        const filters = [];
+        
+        // Date range filter
+        if (createdFrom) {
+            filters.push(`CreationDateTime ge datetimeoffset'${createdFrom}T00:00:00Z'`);
+        }
+        if (createdTo) {
+            filters.push(`CreationDateTime le datetimeoffset'${createdTo}T23:59:59Z'`);
+        }
+
+        // Keyset cursor filter: fetch records AFTER the cursor position
+        // Using composite key (CreationDateTime, ID) for deterministic ordering
+        if (afterCreationDateTime && afterLeadId) {
+            // Records where: (CreationDateTime > cursor) OR (CreationDateTime = cursor AND ID > cursorId)
+            const cursorDate = new Date(afterCreationDateTime).toISOString();
+            filters.push(`(CreationDateTime gt datetimeoffset'${cursorDate}' or (CreationDateTime eq datetimeoffset'${cursorDate}' and ID gt '${afterLeadId}'))`);
+        } else if (afterLeadId) {
+            // Fallback: just use ID if no datetime available
+            filters.push(`ID gt '${afterLeadId}'`);
+        }
+
+        const selectFields = 'ObjectID,ID,Name,UserStatusCode,AccountPartyID,AccountPartyName,OwnerPartyID,CreationDateTime';
+        const queryParams = new URLSearchParams({
+            '$format': 'json',
+            '$select': selectFields,
+            '$orderby': 'CreationDateTime asc,ID asc',  // Must match cursor ordering
+            '$top': limit.toString()
+        });
+        
+        if (filters.length > 0) {
+            queryParams.set('$filter', filters.join(' and '));
+        }
+
+        const url = `${this.baseUrl}/sap/c4c/odata/v1/c4codataapi/LeadCollection?${queryParams}`;
+        console.log(`[V1LeadClient] Fetching leads after cursor: ${url}`);
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Authorization': this._getAuthHeader(), 'Accept': 'application/json' }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            const err = new Error(`HTTP ${response.status}: ${errorText.substring(0, 200)}`);
+            err.step = 'FETCH_V1';
+            throw err;
+        }
+
+        const data = await response.json();
+        const leads = data.d?.results || [];
+        
+        console.log(`[V1LeadClient] Fetched ${leads.length} leads after cursor`);
+        return leads;
+    }
+
+    /**
+     * Count total leads in date range (for progress calculation)
+     */
+    async countLeadsInRange(createdFrom, createdTo) {
+        const { baseUrl, user, password } = await this._getCredentials();
+        this.baseUrl = baseUrl; this.user = user; this.password = password;
+
+        const filters = [];
+        if (createdFrom) filters.push(`CreationDateTime ge datetimeoffset'${createdFrom}T00:00:00Z'`);
+        if (createdTo) filters.push(`CreationDateTime le datetimeoffset'${createdTo}T23:59:59Z'`);
+
+        const queryParams = new URLSearchParams({ '$format': 'json', '$inlinecount': 'allpages', '$top': '1' });
+        if (filters.length > 0) queryParams.set('$filter', filters.join(' and '));
+
+        const url = `${this.baseUrl}/sap/c4c/odata/v1/c4codataapi/LeadCollection?${queryParams}`;
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Authorization': this._getAuthHeader(), 'Accept': 'application/json' }
+        });
+
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        const count = parseInt(data.d?.__count, 10);
+        console.log(`[V1LeadClient] Total leads in range: ${count}`);
+        return isNaN(count) ? null : count;
     }
 
     async fetchLeadAttachments(leadObjectId) {

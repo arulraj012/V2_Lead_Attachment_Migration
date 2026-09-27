@@ -335,6 +335,124 @@ class CheckpointService {
         await this.init();
         await DELETE.from(this.entities.ObjectFailedRecord).where({ ID: recordId });
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // CURSOR-BASED PAGINATION METHODS
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /** Get current cursor position for keyset pagination */
+    async getCursor(objectType = DEFAULT_OBJECT_TYPE) {
+        await this.init();
+        const cp = await SELECT.one.from(this.entities.Checkpoint).where({ objectType });
+        return {
+            cursorLeadId: cp?.cursorLeadId || null,
+            cursorCreationDateTime: cp?.cursorCreationDateTime || null,
+            cursorPosition: cp?.cursorPosition || 0,
+            filterCreatedFrom: cp?.filterCreatedFrom || null,
+            filterCreatedTo: cp?.filterCreatedTo || null,
+            totalLeadsInRange: cp?.totalLeadsInRange || null
+        };
+    }
+
+    /** Update cursor position after processing a lead */
+    async updateCursor(objectType, { cursorLeadId, cursorCreationDateTime, incrementPosition = true }) {
+        await this.init();
+        const cp = await SELECT.one.from(this.entities.Checkpoint).where({ objectType });
+        const updates = {
+            cursorLeadId,
+            cursorCreationDateTime: cursorCreationDateTime ? new Date(cursorCreationDateTime) : null
+        };
+        if (incrementPosition) updates.cursorPosition = (cp?.cursorPosition || 0) + 1;
+        await UPDATE(this.entities.Checkpoint).set(updates).where({ objectType });
+    }
+
+    /** Initialize cursor for a new migration run with date range */
+    async initializeCursor(objectType, { createdFrom, createdTo, totalLeadsInRange, resetCursor = false }) {
+        await this.init();
+        const cp = await SELECT.one.from(this.entities.Checkpoint).where({ objectType });
+        const updates = { filterCreatedFrom: createdFrom, filterCreatedTo: createdTo, totalLeadsInRange };
+        
+        if (resetCursor || cp?.filterCreatedFrom !== createdFrom || cp?.filterCreatedTo !== createdTo) {
+            updates.cursorLeadId = null;
+            updates.cursorCreationDateTime = null;
+            updates.cursorPosition = 0;
+            console.log(`[CheckpointService] Cursor reset for date range: ${createdFrom} to ${createdTo}`);
+        }
+        
+        if (cp) await UPDATE(this.entities.Checkpoint).set(updates).where({ objectType });
+        else await INSERT.into(this.entities.Checkpoint).entries({ objectType, status: 'IDLE', totalMigrated: 0, ...updates });
+    }
+
+    /** Reset cursor to start from beginning */
+    async resetCursor(objectType = DEFAULT_OBJECT_TYPE) {
+        await this.init();
+        await UPDATE(this.entities.Checkpoint).set({ cursorLeadId: null, cursorCreationDateTime: null, cursorPosition: 0 }).where({ objectType });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // LEAD STATUS TRACKING METHODS
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    /** Mark a lead as being processed */
+    async markLeadProcessing(objectType, lead, runId) {
+        await this.init();
+        const existing = await SELECT.one.from(this.entities.ParentMigrationStatus)
+            .where({ objectType, parentDisplayId: lead.ID });
+        const data = {
+            objectType, parentDisplayId: lead.ID, status: 'PROCESSING',
+            v1CreationDateTime: lead.CreationDateTime ? new Date(lead.CreationDateTime) : null,
+            processedInRunId: runId, lastProcessedAt: new Date()
+        };
+        if (existing) await UPDATE(this.entities.ParentMigrationStatus).set(data).where({ objectType, parentDisplayId: lead.ID });
+        else await INSERT.into(this.entities.ParentMigrationStatus).entries(data);
+    }
+
+    /** Mark a lead as completed with attachment counts */
+    async markLeadCompleted(objectType, leadId, { v2LeadId, migrated, failed, skipped, total }) {
+        await this.init();
+        await UPDATE(this.entities.ParentMigrationStatus).set({
+            status: 'COMPLETED', parentV2ObjectID: v2LeadId, v2Validated: true,
+            attachmentsMigrated: migrated || 0, attachmentsFailed: failed || 0,
+            attachmentsSkipped: skipped || 0, totalAttachments: total || 0, lastProcessedAt: new Date()
+        }).where({ objectType, parentDisplayId: leadId });
+    }
+
+    /** Mark a lead as failed */
+    async markLeadFailed(objectType, leadId) {
+        await this.init();
+        await UPDATE(this.entities.ParentMigrationStatus).set({ status: 'FAILED', lastProcessedAt: new Date() })
+            .where({ objectType, parentDisplayId: leadId });
+    }
+
+    /** Mark a lead as skipped (e.g., not found in V2) */
+    async markLeadSkipped(objectType, leadId) {
+        await this.init();
+        const existing = await SELECT.one.from(this.entities.ParentMigrationStatus).where({ objectType, parentDisplayId: leadId });
+        const data = { status: 'SKIPPED', v2Validated: false, lastProcessedAt: new Date() };
+        if (existing) await UPDATE(this.entities.ParentMigrationStatus).set(data).where({ objectType, parentDisplayId: leadId });
+        else await INSERT.into(this.entities.ParentMigrationStatus).entries({ objectType, parentDisplayId: leadId, ...data });
+    }
+
+    /** Check if a lead has already been completed */
+    async isLeadCompleted(objectType, leadId) {
+        await this.init();
+        const status = await SELECT.one.from(this.entities.ParentMigrationStatus).where({ objectType, parentDisplayId: leadId });
+        return status?.status === 'COMPLETED';
+    }
+
+    /** Get processing statistics */
+    async getProcessingStats(objectType = DEFAULT_OBJECT_TYPE) {
+        await this.init();
+        const cursor = await this.getCursor(objectType);
+        const completed = await SELECT.one.columns('count(*) as count').from(this.entities.ParentMigrationStatus).where({ objectType, status: 'COMPLETED' });
+        const failed = await SELECT.one.columns('count(*) as count').from(this.entities.ParentMigrationStatus).where({ objectType, status: 'FAILED' });
+        const skipped = await SELECT.one.columns('count(*) as count').from(this.entities.ParentMigrationStatus).where({ objectType, status: 'SKIPPED' });
+        return {
+            cursorPosition: cursor.cursorPosition, totalLeadsInRange: cursor.totalLeadsInRange,
+            leadsCompleted: completed?.count || 0, leadsFailed: failed?.count || 0, leadsSkipped: skipped?.count || 0,
+            progressPercent: cursor.totalLeadsInRange > 0 ? ((cursor.cursorPosition / cursor.totalLeadsInRange) * 100).toFixed(1) + '%' : 'N/A'
+        };
+    }
 }
 
 module.exports = new CheckpointService();

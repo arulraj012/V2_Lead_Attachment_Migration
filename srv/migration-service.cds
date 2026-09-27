@@ -61,12 +61,14 @@ service MigrationService {
      * @returns Summary message of migration results
      */
     action triggerRun(
-        objectType  : String default 'LEAD_ATTACHMENT',
-        mode        : String default 'ATTACHMENT_ONLY',
-        parentId    : String,
-        createdFrom : Date,
-        createdTo   : Date,
-        maxRecords  : Integer
+        objectType      : String default 'LEAD_ATTACHMENT',
+        mode            : String default 'ATTACHMENT_ONLY',
+        parentId        : String,
+        createdFrom     : Date,
+        createdTo       : Date,
+        maxRecords      : Integer,
+        maxLeadsPerRun  : Integer default 50,
+        resetCursor     : Boolean default false
     ) returns String;
 
     /**

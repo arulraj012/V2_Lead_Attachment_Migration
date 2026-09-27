@@ -336,3 +336,100 @@ Step 2: Link to Lead (same as files)
 
 *End of Documentation*
 
+
+---
+
+## 7. Performance Architecture (v2.0)
+
+### 7.1 Cursor-Based Pagination
+
+The migration uses **keyset pagination** instead of offset pagination for efficient large-scale migrations.
+
+**Why Keyset Pagination?**
+| Offset Pagination | Keyset Pagination |
+|-------------------|-------------------|
+| `$skip=1000&$top=50` | `$filter=ID gt 'last-id'&$top=50` |
+| Performance degrades with large offsets | Consistent performance |
+| Can miss/duplicate records | Stable cursor position |
+| Not suitable for 10K+ records | Scales to millions |
+
+**Cursor Structure:**
+```
+Cursor = (CreationDateTime, LeadID)
+
+Query: $filter=CreationDateTime ge '2025-01-01'
+         AND (CreationDateTime gt '{cursorDate}'
+              OR (CreationDateTime eq '{cursorDate}' AND ID gt '{cursorId}'))
+       &$orderby=CreationDateTime asc,ID asc
+       &$top=50
+```
+
+### 7.2 Parallel Attachment Processing
+
+| Level | Processing | Why |
+|-------|------------|-----|
+| **Leads** | Sequential | Maintains cursor order, crash-safe checkpointing |
+| **Attachments** | Parallel (5 concurrent) | Speed! Download/upload are I/O bound |
+
+**Performance Improvement:**
+- Sequential: 50 leads x 10 attachments x 3s each = ~25 minutes
+- Parallel (5): 50 leads x 10 attachments / 5 = ~5 minutes
+
+### 7.3 Configuration Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `maxLeadsPerRun` | 50 | Leads to process per job run |
+| `attachmentConcurrency` | 5 | Parallel attachments per lead |
+| `delayBetweenLeads` | 500ms | API throttling between leads |
+| `delayBetweenAttachments` | 100ms | Delay between parallel attachments |
+
+### 7.4 Lead Status Tracking
+
+Each lead is tracked with status:
+- **PENDING** - Not yet processed
+- **PROCESSING** - Currently being processed
+- **COMPLETED** - All attachments migrated
+- **SKIPPED** - Lead not found in V2
+- **FAILED** - Error during processing
+
+**Key Benefit:** Once a lead is COMPLETED, it is never re-processed on subsequent runs.
+
+### 7.5 Resume Behavior
+
+```
+Scenario: Job crashes after processing 30 of 50 leads
+
+Before (v1.0):
+  - Next run starts from beginning
+  - Duplicate detection skips attachments
+  - Wastes time re-fetching all leads
+
+After (v2.0):
+  - Cursor saved at lead #30
+  - Next run: $filter=ID gt ''30th-lead-id''
+  - Fetches ONLY leads 31-50
+  - No wasted work
+```
+
+### 7.6 API Usage Example
+
+```bash
+# Start migration with cursor-based pagination
+curl -X POST "http://localhost:4004/migration/triggerRun" \
+  -H "Content-Type: application/json" \
+  -d ''{
+    "createdFrom": "2025-01-01",
+    "createdTo": "2025-12-31",
+    "maxLeadsPerRun": 50,
+    "resetCursor": false
+  }''
+
+# Reset cursor to start from beginning
+curl -X POST "http://localhost:4004/migration/triggerRun" \
+  -d ''{ "createdFrom": "2025-01-01", "createdTo": "2025-12-31", "resetCursor": true }''
+```
+
+---
+
+*Documentation updated for v2.0 - Cursor-based pagination and parallel processing*

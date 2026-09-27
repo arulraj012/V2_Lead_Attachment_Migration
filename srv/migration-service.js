@@ -1,5 +1,5 @@
-const cds = require('@sap/cds');
-const { runMigration, getBatchConfig, setBatchConfig, OBJECT_TYPE } = require('./migration/MigrationJob');
+﻿const cds = require('@sap/cds');
+const { runMigration, getMigrationConfig, setMigrationConfig, getBatchConfig, setBatchConfig, OBJECT_TYPE } = require('./migration/MigrationJob');
 const checkpoint = require('./migration/CheckpointService');
 const fieldMapping = require('./migration/FieldMappingService');
 
@@ -33,14 +33,16 @@ class MigrationService extends cds.ApplicationService {
     }
 
     async handleTriggerRun(req) {
-        const { objectType, mode, parentId, createdFrom, createdTo, maxRecords } = req.data;
+        const { objectType, mode, parentId, createdFrom, createdTo, maxRecords, maxLeadsPerRun, resetCursor } = req.data;
         const targetObjectType = objectType || OBJECT_TYPE;
-        
-        const filters = {};
-        if (parentId) filters.leadId = parentId; // For Lead attachments, parentId is LeadID
-        if (createdFrom) filters.createdFrom = createdFrom;
-        if (createdTo) filters.createdTo = createdTo;
-        if (maxRecords) filters.maxRecords = maxRecords;
+
+        const filters = {
+            createdFrom: createdFrom || null,
+            createdTo: createdTo || null,
+            maxLeadsPerRun: maxLeadsPerRun || maxRecords || 50,
+            resetCursor: resetCursor === true || resetCursor === 'true'
+        };
+        if (parentId) filters.leadId = parentId;
 
         const lockResult = await checkpoint.tryAcquireLock(mode || 'ATTACHMENT_ONLY', targetObjectType, 'UI');
         if (!lockResult.acquired) {
@@ -50,13 +52,16 @@ class MigrationService extends cds.ApplicationService {
         const runId = lockResult.runId;
         (async () => {
             try {
-                await runMigration(filters, runId);
+                const result = await runMigration(filters, runId);
+                console.log(`[MigrationService] Run ${runId} completed:`, JSON.stringify(result));
             } catch (err) {
                 console.error(`[MigrationService] Run ${runId} failed: ${err.message}`);
             }
         })();
 
-        return JSON.stringify({ status: 'accepted', runId, objectType: targetObjectType, message: 'Migration started' });
+        return JSON.stringify({ status: 'accepted', runId, objectType: targetObjectType, message: 'Migration started',
+            config: { createdFrom: filters.createdFrom, createdTo: filters.createdTo, maxLeadsPerRun: filters.maxLeadsPerRun }
+        });
     }
 
     async handleGetStatus(req) {
@@ -357,3 +362,5 @@ class MigrationService extends cds.ApplicationService {
 module.exports = MigrationService;
 
 module.exports = MigrationService;
+
+

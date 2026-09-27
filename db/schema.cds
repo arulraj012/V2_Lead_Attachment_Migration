@@ -96,11 +96,22 @@ aspect attachmentMeta {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 entity Checkpoint {
-    key objectType       : ObjectType;
-    lastRunAt            : Timestamp;
-    lastSuccessAt        : Timestamp;
-    status               : MigrationStatus default 'IDLE';
-    totalMigrated        : Integer default 0;
+    key objectType            : ObjectType;
+    lastRunAt                 : Timestamp;
+    lastSuccessAt             : Timestamp;
+    status                    : MigrationStatus default 'IDLE';
+    totalMigrated             : Integer default 0;
+    
+    // Cursor fields for keyset pagination
+    cursorLeadId              : String(40);       // Last processed Lead ID
+    cursorCreationDateTime    : Timestamp;        // Last processed Lead's CreationDateTime
+    cursorPosition            : Integer default 0; // Total leads processed (for progress %)
+    
+    // Run configuration (persisted for resume)
+    filterCreatedFrom         : Date;             // Date range start
+    filterCreatedTo           : Date;             // Date range end
+    totalLeadsInRange         : Integer;          // For progress calculation
+    
     lastRunId            : UUID;
     lastRunMode          : MigrationMode;
     lastRunMigrated      : Integer default 0;
@@ -200,15 +211,23 @@ entity ObjectQueue : timestamped, v1Source, parentRef, attachmentMeta {
  * ParentMigrationStatus - Track which parents have been processed for attachment migration
  * NOT for ID mapping (DTT preserves IDs) - just for tracking progress
  */
+/** Lead processing status for cursor-based migration */
+type LeadProcessingStatus : String(20) enum { PENDING; PROCESSING; COMPLETED; FAILED; SKIPPED; }
+
 entity ParentMigrationStatus : timestamped {
     key objectType      : ObjectType;           // e.g., LEAD_ATTACHMENT
     key parentDisplayId : String(40);           // Lead/Ticket/Account displayId (same in V1 & V2)
     parentV2ObjectID    : String(40);           // Cached V2 UUID for performance
     v2Validated         : Boolean default false; // Confirmed parent exists in V2
+    status              : LeadProcessingStatus default 'PENDING';  // Processing status
     attachmentsMigrated : Integer default 0;
     attachmentsPending  : Integer default 0;
     attachmentsFailed   : Integer default 0;
+    attachmentsSkipped  : Integer default 0;    // Already existed in V2
+    totalAttachments    : Integer default 0;    // Total attachments for this lead
     lastProcessedAt     : Timestamp;
+    processedInRunId    : UUID;                 // Which run processed this lead
+    v1CreationDateTime  : Timestamp;            // For cursor ordering
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
