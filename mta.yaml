@@ -14,7 +14,65 @@ build-parameters:
         - npx cds build --production
 
 modules:
+  # ============================================================
+  # React UI - HTML5 Application
+  # ============================================================
+  - name: v2-lead-attachment-migration-ui
+    type: html5
+    path: app/migration-ui
+    build-parameters:
+      builder: custom
+      commands:
+        - npm ci
+        - npm run build
+        - node zip-ui.cjs
+      build-result: .
+      supported-platforms: []
+
+  # ============================================================
+  # Standalone Approuter - serves the UI and proxies backend calls
+  # ============================================================
+  - name: v2-lead-attachment-migration-approuter
+    type: approuter.nodejs
+    path: approuter
+    parameters:
+      memory: 256M
+      disk-quota: 256M
+    requires:
+      - name: v2-lead-attachment-migration-xsuaa
+      - name: v2-lead-attachment-migration-html5-repo-runtime
+      - name: srv-api
+        group: destinations
+        properties:
+          name: srv-api
+          url: ~{srv-url}
+          forwardAuthToken: true
+    provides:
+      - name: app-url
+        properties:
+          app-url: ${default-url}
+
+  # ============================================================
+  # HTML5 Application Repository Deployer
+  # ============================================================
+  - name: v2-lead-attachment-migration-ui-deployer
+    type: com.sap.application.content
+    path: .
+    requires:
+      - name: v2-lead-attachment-migration-html5-repo-host
+        parameters:
+          content-target: true
+    build-parameters:
+      build-result: resources
+      requires:
+        - name: v2-lead-attachment-migration-ui
+          artifacts:
+            - migration-ui.zip
+          target-path: resources/
+
+  # ============================================================
   # CAP Backend
+  # ============================================================
   - name: v2-lead-attachment-migration-srv
     type: nodejs
     path: gen/srv
@@ -41,7 +99,9 @@ modules:
       V2_DESTINATION_NAME: V2_SSCV2
       NODE_ENV: production
 
+  # ============================================================
   # HANA DB Deployer
+  # ============================================================
   - name: v2-lead-attachment-migration-db-deployer
     type: nodejs
     path: gen/db
@@ -64,53 +124,10 @@ modules:
         properties:
           TARGET_CONTAINER: ~{hdi-service-name}
 
-  # React Admin UI
-  - name: v2-lead-attachment-migration-ui
-    type: html5
-    path: app/migration-ui
-    build-parameters:
-      builder: custom
-      commands:
-        - npm ci
-        - npm run build
-      supported-platforms: []
-      build-result: dist
-
-  # UI Deployer (HTML5 App Repository)
-  - name: v2-lead-attachment-migration-ui-deployer
-    type: com.sap.application.content
-    path: .
-    requires:
-      - name: v2-lead-attachment-migration-html5-repo-host
-        parameters:
-          content-target: true
-    build-parameters:
-      build-result: resources
-      requires:
-        - name: v2-lead-attachment-migration-ui
-          artifacts:
-            - ./*
-          target-path: resources/v2leadattachmentmigration
-
-  # App Router (Managed Approuter)
-  - name: v2-lead-attachment-migration-approuter
-    type: approuter.nodejs
-    path: app/
-    parameters:
-      disk-quota: 256M
-      memory: 256M
-    requires:
-      - name: v2-lead-attachment-migration-xsuaa
-      - name: v2-lead-attachment-migration-html5-repo-rt
-      - name: srv-api
-        group: destinations
-        properties:
-          name: srv-api
-          url: ~{srv-url}
-          forwardAuthToken: true
-
 resources:
+  # ============================================================
   # HANA Cloud / HDI
+  # ============================================================
   - name: v2-lead-attachment-migration-hana
     type: org.cloudfoundry.managed-service
     parameters:
@@ -119,7 +136,9 @@ resources:
     properties:
       hdi-service-name: ${service-name}
 
+  # ============================================================
   # XSUAA
+  # ============================================================
   - name: v2-lead-attachment-migration-xsuaa
     type: org.cloudfoundry.managed-service
     parameters:
@@ -130,22 +149,28 @@ resources:
         xsappname: v2-lead-attachment-migration-${org}
         tenant-mode: dedicated
 
+  # ============================================================
   # Destination Service
+  # ============================================================
   - name: v2-lead-attachment-migration-destination
     type: org.cloudfoundry.managed-service
     parameters:
       service: destination
       service-plan: lite
 
-  # HTML5 Application Repository Host
+  # ============================================================
+  # HTML5 Application Repository - Host (stores the UI zip)
+  # ============================================================
   - name: v2-lead-attachment-migration-html5-repo-host
     type: org.cloudfoundry.managed-service
     parameters:
       service: html5-apps-repo
       service-plan: app-host
 
-  # HTML5 Application Repository Runtime
-  - name: v2-lead-attachment-migration-html5-repo-rt
+  # ============================================================
+  # HTML5 Application Repository - Runtime (serves the UI via Approuter)
+  # ============================================================
+  - name: v2-lead-attachment-migration-html5-repo-runtime
     type: org.cloudfoundry.managed-service
     parameters:
       service: html5-apps-repo

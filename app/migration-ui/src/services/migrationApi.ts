@@ -1,4 +1,4 @@
-import type { MigrationStatus, LeadAttachmentFailedRecord, LeadAttachmentAuditLog, LeadMigrationMapping, RunHistory, ODataResponse, BatchConfig } from '../types/migration';
+import type { MigrationStatus, LeadAttachmentFailedRecord, LeadAttachmentAuditLog, LeadMigrationMapping, RunHistory, ODataResponse, BatchConfig, MigrationTriggerOptions, MigrationTriggerResponse } from '../types/migration';
 import { getHttpErrorMessage } from '../utils/apiError';
 
 const BASE_URL = '/migration';
@@ -46,10 +46,34 @@ export async function getMigrationStatus(): Promise<MigrationStatus> {
 }
 
 // Migration Actions
-export async function triggerMigration(options: { mode?: string; leadId?: string; maxRecords?: number } = {}): Promise<{ status: string; runId?: string; message: string }> {
+export async function triggerMigration(options: MigrationTriggerOptions = {}): Promise<MigrationTriggerResponse> {
   const result = await fetchApi<{ value: string }>(`${BASE_URL}/triggerRun`, {
     method: 'POST',
-    body: JSON.stringify(options),
+    body: JSON.stringify({
+      objectType: options.objectType,
+      mode: options.mode || 'ATTACHMENT_ONLY',
+      parentId: options.parentId,
+      createdFrom: options.createdFrom,
+      createdTo: options.createdTo,
+      maxRecords: options.maxRecords,
+    }),
+  });
+  return JSON.parse(result.value);
+}
+
+/**
+ * Test migration with limited records (default 5)
+ */
+export async function testMigration(options: MigrationTriggerOptions = {}): Promise<MigrationTriggerResponse> {
+  const result = await fetchApi<{ value: string }>(`${BASE_URL}/testMigration`, {
+    method: 'POST',
+    body: JSON.stringify({
+      objectType: options.objectType,
+      parentId: options.parentId,
+      createdFrom: options.createdFrom,
+      createdTo: options.createdTo,
+      maxRecords: options.maxRecords || 5,
+    }),
   });
   return JSON.parse(result.value);
 }
@@ -73,7 +97,7 @@ export async function getFailedRecords(options: { top?: number; skip?: number } 
   if (options.top) params['$top'] = String(options.top);
   if (options.skip) params['$skip'] = String(options.skip);
   
-  const result = await fetchApi<ODataResponse<LeadAttachmentFailedRecord>>(`${BASE_URL}/LeadAttachmentFailedRecord${buildODataQuery(params)}`);
+  const result = await fetchApi<ODataResponse<LeadAttachmentFailedRecord>>(`${BASE_URL}/LeadAttachmentFailedRecords${buildODataQuery(params)}`);
   return { records: result.value || [], count: result['@odata.count'] ?? result.value?.length ?? 0 };
 }
 

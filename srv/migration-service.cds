@@ -1,71 +1,92 @@
 using { migration } from '../db/schema';
 
 /**
- * MigrationService - CAP service for V1 to V2 Lead Attachment migration
- * Provides read access to migration entities and actions for job control
+ * MigrationService - CAP service for V1 to V2 Attachment migration
+ * 
+ * NOTE: Parent objects (Lead, Ticket, etc.) are migrated via DTT tool.
+ *       DTT preserves displayId, so we use it to find V2 parents.
+ *       This service migrates ATTACHMENTS only.
  */
 @path: '/migration'
 @requires: 'authenticated-user'
 service MigrationService {
 
-    // Base Migration Entities
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BASE ENTITIES
+    // ═══════════════════════════════════════════════════════════════════════════
+    
     @readonly entity Checkpoint     as projection on migration.Checkpoint;
-    @readonly entity FailedRecord   as projection on migration.FailedRecord;
-    @readonly entity AuditLog       as projection on migration.AuditLog;
     @readonly entity RunHistory     as projection on migration.RunHistory;
     @readonly entity BatchConfig    as projection on migration.BatchConfig;
     @readonly entity MappingConfig  as projection on migration.MappingConfig;
 
-    // Lead Attachment Specific Entities
-    @readonly entity LeadAttachmentAuditLog     as projection on migration.LeadAttachmentAuditLog;
-    @readonly entity LeadAttachmentFailedRecord as projection on migration.LeadAttachmentFailedRecord;
-    @readonly entity LeadMigrationMapping       as projection on migration.LeadMigrationMapping;
-    @readonly entity LeadAttachmentQueue        as projection on migration.LeadAttachmentQueue;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MIGRATION ENTITIES
+    // ═══════════════════════════════════════════════════════════════════════════
     
-    // Views
-    @readonly entity UnresolvedFailedAttachments as projection on migration.UnresolvedFailedAttachments;
-    @readonly entity PendingAttachments          as projection on migration.PendingAttachments;
-    @readonly entity LeadAttachmentSummary       as projection on migration.LeadAttachmentSummary;
+    @readonly entity ObjectAuditLog          as projection on migration.ObjectAuditLog;
+    @readonly entity ObjectFailedRecord      as projection on migration.ObjectFailedRecord;
+    @readonly entity ObjectQueue             as projection on migration.ObjectQueue;
+    @readonly entity ParentMigrationStatus   as projection on migration.ParentMigrationStatus;
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GENERIC VIEWS
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    @readonly entity UnresolvedFailedRecords as projection on migration.UnresolvedFailedRecords;
+    @readonly entity PendingQueueItems       as projection on migration.PendingQueueItems;
+    @readonly entity FailedQueueItems        as projection on migration.FailedQueueItems;
 
-    // ============================================
-    // Migration Job Control Actions
-    // ============================================
+    // ═══════════════════════════════════════════════════════════════════════════
+    // LEAD ATTACHMENT VIEWS
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    @readonly entity LeadAttachmentAuditLog     as projection on migration.LeadAttachmentAuditLog;
+    @readonly entity LeadAttachmentFailedRecords as projection on migration.LeadAttachmentFailedRecords;
+    @readonly entity LeadAttachmentQueue        as projection on migration.LeadAttachmentQueue;
+    @readonly entity LeadMigrationProgress      as projection on migration.LeadMigrationProgress;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // MIGRATION JOB CONTROL ACTIONS
+    // ═══════════════════════════════════════════════════════════════════════════
     
     /**
      * Trigger an immediate migration run
+     * @param objectType Type of object to migrate (LEAD_ATTACHMENT, TICKET_ATTACHMENT, etc.)
      * @param mode Migration mode: 'FULL', 'DELTA', 'ATTACHMENT_ONLY'
-     * @param leadId V1 Lead ID filter (human-readable ID)
-     * @param createdFrom Filter leads created on or after this date
-     * @param createdTo Filter leads created on or before this date
+     * @param parentId V1 Parent ID filter (e.g., Lead ID for attachments)
+     * @param createdFrom Filter records created on or after this date
+     * @param createdTo Filter records created on or before this date
      * @param maxRecords Maximum records to process (for testing)
      * @returns Summary message of migration results
      */
     action triggerRun(
+        objectType  : String default 'LEAD_ATTACHMENT',
         mode        : String default 'ATTACHMENT_ONLY',
-        leadId      : String,
+        parentId    : String,
         createdFrom : Date,
         createdTo   : Date,
         maxRecords  : Integer
     ) returns String;
 
     /**
-     * Get current migration status and statistics
+     * Get current migration status and statistics for an object type
      */
-    function getStatus() returns {
+    function getStatus(objectType : String default 'LEAD_ATTACHMENT') returns {
+        objectType        : String;
         status            : String;
         lastRunAt         : Timestamp;
         lastSuccessAt     : Timestamp;
         totalMigrated     : Integer;
         pendingFailed     : Integer;
+        pendingInQueue    : Integer;
         isActive          : Boolean;
         lastRunId         : UUID;
         lastRunMode       : String;
         lastRunMigrated   : Integer;
         lastRunFailed     : Integer;
+        lastRunSkipped    : Integer;
         lastRunDurationMs : Integer;
-        // Attachment specific
-        pendingInQueue    : Integer;
-        leadsWithPending  : Integer;
     };
 
     /**
@@ -74,57 +95,63 @@ service MigrationService {
     action retryFailed(recordId : UUID) returns String;
 
     /**
-     * Retry all unresolved failed records
+     * Retry all unresolved failed records for an object type
      */
-    action retryAllFailed() returns String;
+    action retryAllFailed(objectType : String default 'LEAD_ATTACHMENT') returns String;
 
     /**
      * Test migration with limited records
+     * Supports same filters as triggerRun for targeted testing
      */
     action testMigration(
-        leadId     : String,
-        maxRecords : Integer default 5
+        objectType  : String default 'LEAD_ATTACHMENT',
+        parentId    : String,
+        createdFrom : Date,
+        createdTo   : Date,
+        maxRecords  : Integer default 5
     ) returns String;
 
-    // ============================================
-    // Lead Mapping Management
-    // ============================================
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PARENT VALIDATION & QUEUE MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Import V1 to V2 Lead mappings (for DTT-migrated leads)
-     * @param mappings JSON array of {v1LeadId, v2LeadId} pairs
+     * Validate that parents exist in V2 system
+     * Since DTT preserves displayId, this checks V2 by displayId
+     * @param objectType Attachment type (LEAD_ATTACHMENT, TICKET_ATTACHMENT, etc.)
+     * @param parentDisplayIds JSON array of parent displayIds to validate
      */
-    action importLeadMappings(mappings : String) returns String;
+    action validateParentsInV2(
+        objectType       : String default 'LEAD_ATTACHMENT',
+        parentDisplayIds : String
+    ) returns String;
 
     /**
-     * Refresh lead mappings by querying V2 system
-     * Finds V2 leads that have matching V1 displayIds
+     * Queue attachments for migration
+     * @param objectType Type of attachment to queue (LEAD_ATTACHMENT, etc.)
+     * @param parentDisplayId Optional: queue only for specific parent (Lead/Ticket displayId)
+     * @param priority Queue priority (1=highest, 10=lowest)
      */
-    action refreshLeadMappings(leadIdPattern : String) returns String;
+    action queueAttachments(
+        objectType       : String default 'LEAD_ATTACHMENT',
+        parentDisplayId  : String,
+        priority         : Integer default 5
+    ) returns String;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CONFIGURATION MANAGEMENT
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Queue attachments for a specific lead
+     * Get batch configuration for an object type
      */
-    action queueLeadAttachments(v1LeadId : String) returns String;
-
-    /**
-     * Queue all attachments for leads with existing mappings
-     */
-    action queueAllAttachments() returns String;
-
-    // ============================================
-    // Configuration Management
-    // ============================================
-
-    /**
-     * Get current batch configuration
-     */
-    function getBatchConfig() returns String;
+    function getBatchConfig(objectType : String default 'LEAD_ATTACHMENT') returns String;
 
     /**
      * Update batch configuration
      */
     action updateBatchConfig(
+        objectType          : String default 'LEAD_ATTACHMENT',
         batchSize           : Integer,
         maxRecordsPerRun    : Integer,
         delayBetweenBatches : Integer,
@@ -135,19 +162,24 @@ service MigrationService {
     /**
      * Get field mapping configuration
      */
-    function getMappingConfig() returns String;
+    function getMappingConfig(
+        objectType  : String default 'LEAD_ATTACHMENT',
+        mappingType : String default 'FIELD_MAPPING'
+    ) returns String;
 
     /**
      * Update field mapping configuration
      */
     action updateMappingConfig(
-        mappingType : String,
-        mappings    : String
+        objectType  : String default 'LEAD_ATTACHMENT',
+        mappingType : String default 'FIELD_MAPPING',
+        mappings    : String,
+        description : String
     ) returns String;
 
-    // ============================================
-    // CPI / BTP Job Scheduling Service Endpoint
-    // ============================================
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CPI / BTP JOB SCHEDULING ENDPOINT
+    // ═══════════════════════════════════════════════════════════════════════════
 
     /**
      * CPI trigger endpoint - fire and forget
@@ -155,8 +187,9 @@ service MigrationService {
      */
     @requires: 'MigrationJob'
     action runMigration(
+        objectType  : String default 'LEAD_ATTACHMENT',
         mode        : String default 'ATTACHMENT_ONLY',
-        leadId      : String,
+        parentId    : String,
         createdFrom : Date,
         createdTo   : Date,
         maxRecords  : Integer

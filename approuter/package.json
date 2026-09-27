@@ -1,7 +1,6 @@
 {
   "name": "approuter",
   "version": "1.0.0",
-  "description": "Approuter for Lead Attachment Migration",
   "scripts": {
     "start": "node node_modules/@sap/approuter/approuter.js"
   },

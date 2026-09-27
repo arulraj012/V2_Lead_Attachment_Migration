@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
+// For local dev via CAP: npm run build:local
+// For BTP deployment: npm run build (defaults to production path)
+const isCapLocal = process.env.BUILD_FOR_CAP === 'true' || process.env.npm_lifecycle_event === 'build:local';
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -9,7 +13,8 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
-  base: process.env.NODE_ENV === 'production' ? '/v2leadattachmentmigration/' : './',
+  // Use /ui/ for local CAP serving, /v2leadattachmentmigration/ for BTP production
+  base: isCapLocal ? '/ui/' : '/v2leadattachmentmigration/',
   server: {
     port: 3000,
     proxy: {

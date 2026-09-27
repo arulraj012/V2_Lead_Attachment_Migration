@@ -1,15 +1,25 @@
 /**
  * V2LeadClient - Client for managing leads and attachments in SAP Sales/Service Cloud V2
+ * 
+ * Uses V2DocumentService for attachment uploads (4-step document-service API flow)
  * BTP Destination name: V2_SSCV2
  */
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { resolveDestination } = require('./DestinationService');
+const V2DocumentService = require('./V2DocumentService');
 
 const V2_DESTINATION = 'V2_SSCV2';
 const V2_ENV_FALLBACK = { baseUrl: 'V2_BASE_URL', user: 'V2_USER', password: 'V2_PASSWORD' };
 
+// V2 entity service configuration for Leads
+const LEAD_ENTITY_SERVICE = 'lead-service';
+const LEAD_ENTITY_PATH = 'leads';
+
 class V2LeadClient {
-    constructor() { this._credentials = null; }
+    constructor() { 
+        this._credentials = null;
+        this._documentService = new V2DocumentService();
+    }
 
     async _getCredentials() {
         if (!this._credentials) {
@@ -27,13 +37,28 @@ class V2LeadClient {
         this.baseUrl = baseUrl; this.user = user; this.password = password;
 
         const url = `${this.baseUrl}/sap/c4c/api/v1/lead-service/leads?$filter=displayId eq '${encodeURIComponent(displayId)}'`;
+        console.log(`[V2LeadClient] Finding V2 lead by displayId: ${url}`);
+        
         const response = await fetch(url, {
             method: 'GET',
             headers: { 'Authorization': this._getAuthHeader(), 'Accept': 'application/json' }
         });
-        if (!response.ok) return null;
+        
+        if (!response.ok) {
+            const errorText = await response.text().catch(() => '');
+            console.error(`[V2LeadClient] Failed to find lead: HTTP ${response.status} - ${errorText.substring(0, 200)}`);
+            return null;
+        }
 
-        const leads = (await response.json()).value || [];
+        const data = await response.json();
+        const leads = data.value || [];
+        console.log(`[V2LeadClient] Found ${leads.length} V2 lead(s) for displayId=${displayId}`);
+        
+        if (leads.length > 0) {
+            const lead = leads[0];
+            console.log(`[V2LeadClient] V2 Lead details: id=${lead.id}, displayId=${lead.displayId}, attachments=${lead.attachments?.length || 0}`);
+        }
+        
         return leads.length > 0 ? leads[0] : null;
     }
 
@@ -51,62 +76,112 @@ class V2LeadClient {
         return data.value || data;
     }
 
+    /**
+     * Upload attachment to a Lead using V2 Document Service (4-step flow)
+     * 
+     * @param {string} leadId - V2 Lead ID
+     * @param {Object} attachmentData - { fileName, mimeType, content, description, category }
+     * @returns {Promise<{attachmentId: string, durationMs: number}>}
+     */
     async uploadAttachment(leadId, attachmentData) {
-        const { baseUrl, user, password } = await this._getCredentials();
-        this.baseUrl = baseUrl; this.user = user; this.password = password;
+        console.log(`[V2LeadClient] Uploading attachment "${attachmentData.fileName}" to lead ${leadId}`);
 
-        const url = `${this.baseUrl}/sap/c4c/api/v1/lead-service/leads/${leadId}/attachments`;
-        const startTime = Date.now();
-        const boundary = '----FormBoundary' + Date.now();
-        const body = this._buildMultipartBody(boundary, attachmentData);
+        try {
+            // Use the 4-step document-service API flow
+            const result = await this._documentService.uploadAndLinkDocument(
+                LEAD_ENTITY_SERVICE,
+                LEAD_ENTITY_PATH,
+                leadId,
+                {
+                    fileName: attachmentData.fileName,
+                    mimeType: attachmentData.mimeType || 'application/octet-stream',
+                    content: attachmentData.content,
+                    category: attachmentData.category || 'DOCUMENT'
+                }
+            );
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Authorization': this._getAuthHeader(),
-                'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                'Accept': 'application/json'
-            },
-            body: body
-        });
+            return {
+                attachmentId: result.documentId,
+                durationMs: result.durationMs,
+                fileSize: result.fileSize,
+                displayId: result.displayId
+            };
 
-        if (!response.ok) {
-            const err = new Error(`HTTP ${response.status}`);
-            err.step = 'UPLOAD_ATTACHMENT';
+        } catch (err) {
+            // Preserve error step if set by document service
+            if (!err.step) err.step = 'UPLOAD_ATTACHMENT';
             throw err;
         }
-
-        const data = await response.json();
-        return { attachmentId: data.value?.id || data.id, durationMs: Date.now() - startTime };
     }
 
-    _buildMultipartBody(boundary, { fileName, mimeType, content, description }) {
-        let body = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\n`;
-        body += `Content-Type: ${mimeType || 'application/octet-stream'}\r\n\r\n`;
-        body += content.toString('binary') + '\r\n';
-        if (description) {
-            body += `--${boundary}\r\nContent-Disposition: form-data; name="description"\r\n\r\n${description}\r\n`;
-        }
-        body += `--${boundary}--\r\n`;
-        return Buffer.from(body, 'binary');
-    }
-
+    /**
+     * Get all attachments for a Lead
+     */
     async getLeadAttachments(leadId) {
-        const { baseUrl, user, password } = await this._getCredentials();
-        this.baseUrl = baseUrl; this.user = user; this.password = password;
-
-        const url = `${this.baseUrl}/sap/c4c/api/v1/lead-service/leads/${leadId}/attachments`;
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: { 'Authorization': this._getAuthHeader(), 'Accept': 'application/json' }
-        });
-        if (!response.ok) return [];
-        return (await response.json()).value || [];
+        return this._documentService.getEntityAttachments(
+            LEAD_ENTITY_SERVICE,
+            LEAD_ENTITY_PATH,
+            leadId
+        );
     }
 
+    /**
+     * Check if attachment with given filename exists on Lead
+     */
     async attachmentExists(leadId, fileName) {
+        console.log(`[V2LeadClient] Checking if attachment "${fileName}" exists on lead ${leadId}`);
+        const result = await this._documentService.attachmentExistsByName(
+            LEAD_ENTITY_SERVICE,
+            LEAD_ENTITY_PATH,
+            leadId,
+            fileName
+        );
+        console.log(`[V2LeadClient] Attachment "${fileName}" exists: ${result.exists}${result.documentId ? ` (docId: ${result.documentId})` : ''}`);
+        return result.exists;
+    }
+
+    /**
+     * Get all attachments for debugging
+     */
+    async debugListAttachments(leadId) {
         const attachments = await this.getLeadAttachments(leadId);
-        return attachments.some(a => a.fileName === fileName || a.name === fileName);
+        console.log(`[V2LeadClient] Lead ${leadId} has ${attachments.length} attachment(s):`);
+        attachments.forEach((att, i) => {
+            console.log(`  ${i + 1}. ${att.fileName || att.title || 'unnamed'} (id: ${att.id}, status: ${att.status || 'N/A'})`);
+        });
+        return attachments;
+    }
+
+    /**
+     * Upload a web link attachment to a Lead (no binary content)
+     * 
+     * @param {string} leadId - V2 Lead ID
+     * @param {Object} linkData - { title, url }
+     * @returns {Promise<{attachmentId: string, durationMs: number}>}
+     */
+    async uploadWebLink(leadId, linkData) {
+        console.log(`[V2LeadClient] Creating web link "${linkData.title}" → ${linkData.url} on lead ${leadId}`);
+
+        try {
+            const result = await this._documentService.createAndLinkWebLink(
+                LEAD_ENTITY_SERVICE,
+                LEAD_ENTITY_PATH,
+                leadId,
+                {
+                    title: linkData.title,
+                    url: linkData.url
+                }
+            );
+
+            return {
+                attachmentId: result.documentId,
+                durationMs: result.durationMs
+            };
+
+        } catch (err) {
+            if (!err.step) err.step = 'UPLOAD_WEB_LINK';
+            throw err;
+        }
     }
 }
 

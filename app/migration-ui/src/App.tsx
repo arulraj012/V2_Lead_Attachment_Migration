@@ -19,11 +19,15 @@ const queryClient = new QueryClient({
   },
 });
 
+// Detect basename from Vite's base config (injected at build time)
+// For local CAP: /ui, for BTP: /v2leadattachmentmigration
+const basename = import.meta.env.BASE_URL?.replace(/\/$/, '') || '/ui';
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <BrowserRouter basename="/v2leadattachmentmigration">
+        <BrowserRouter basename={basename}>
           <Routes>
             <Route path="/" element={<AppShell />}>
               <Route index element={<Navigate to="dashboard" replace />} />

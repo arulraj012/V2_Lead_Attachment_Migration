@@ -26,15 +26,15 @@ export function FailedRecordsTable({ records, onRefresh }: FailedRecordsTablePro
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const columns: AnalyticalTableColumnDefinition[] = [
-    { Header: "Lead ID", accessor: "v1DisplayId", width: 150, Cell: (instance: any) => (
+    { Header: "Lead ID", accessor: "parentDisplayId", width: 150, Cell: (instance: any) => (
       <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
-        {instance.row.original.v1DisplayId || instance.row.original.v1ObjectID.substring(0, 12) + "..."}
+        {instance.row.original.parentDisplayId || instance.row.original.v1DisplayId || "-"}
       </span>
     )},
-    { Header: "Attachment", accessor: "attachmentName", width: 200, Cell: (instance: any) => (
+    { Header: "Attachment", accessor: "fileName", width: 200, Cell: (instance: any) => (
       <span title={instance.value}>{instance.value?.length > 30 ? instance.value.substring(0, 27) + "..." : instance.value}</span>
     )},
-    { Header: "Size", accessor: "attachmentSize", width: 80, Cell: (instance: any) => formatFileSize(instance.value) },
+    { Header: "Size", accessor: "fileSize", width: 80, Cell: (instance: any) => formatFileSize(instance.value) },
     { Header: "Error Step", accessor: "errorStep", width: 100, Cell: (instance: any) => (
       <span style={{ padding: "0.125rem 0.375rem", borderRadius: "4px", backgroundColor: "var(--sapNegativeBackground)", color: "var(--sapNegativeColor)", fontSize: "0.75rem" }}>
         {instance.value}
@@ -70,14 +70,13 @@ export function FailedRecordsTable({ records, onRefresh }: FailedRecordsTablePro
           <div style={{ padding: "1rem", minWidth: "400px" }}>
             <div style={{ marginBottom: "1rem" }}>
               <Title level="H6">Lead Information</Title>
-              <Text>V1 Object ID: {selectedRecord.v1ObjectID}</Text><br/>
-              <Text>V1 Display ID: {selectedRecord.v1DisplayId || "-"}</Text><br/>
-              <Text>V1 Attachment ID: {selectedRecord.v1AttachmentID}</Text>
+              <Text>Lead ID: {selectedRecord.parentDisplayId || "-"}</Text><br/>
+              <Text>V1 Attachment ID: {selectedRecord.v1ObjectID}</Text>
             </div>
             <div style={{ marginBottom: "1rem" }}>
               <Title level="H6">Attachment</Title>
-              <Text>Name: {selectedRecord.attachmentName}</Text><br/>
-              <Text>Size: {formatFileSize(selectedRecord.attachmentSize)}</Text><br/>
+              <Text>Name: {selectedRecord.fileName}</Text><br/>
+              <Text>Size: {formatFileSize(selectedRecord.fileSize)}</Text><br/>
               <Text>MIME Type: {selectedRecord.mimeType}</Text>
             </div>
             <div style={{ marginBottom: "1rem" }}>

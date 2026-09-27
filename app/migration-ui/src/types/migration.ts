@@ -1,6 +1,6 @@
 // Migration status types matching the CAP backend
 export type MigrationStatusType = 'IDLE' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'PAUSED';
-export type ErrorStep = 'FETCH_V1' | 'FIND_TARGET' | 'CREATE_TARGET' | 'DOWNLOAD' | 'UPLOAD' | 'UNKNOWN';
+export type ErrorStep = 'FETCH_V1' | 'FIND_TARGET' | 'CREATE_TARGET' | 'DOWNLOAD' | 'UPLOAD' | 'TRANSFORM' | 'VALIDATE' | 'CREATE_DOCUMENT_METADATA' | 'UPLOAD_TO_S3' | 'VERIFY_DOCUMENT' | 'LINK_DOCUMENT' | 'UNKNOWN';
 export type RunStatus = 'RUNNING' | 'COMPLETED' | 'FAILED';
 
 export interface MigrationStatus {
@@ -23,16 +23,18 @@ export interface LeadAttachmentFailedRecord {
   ID: string;
   v1ObjectID: string;
   v1DisplayId: string;
-  v1AttachmentID: string;
-  attachmentName: string;
-  attachmentSize: number;
+  fileName: string;         // renamed from attachmentName in schema
+  fileSize: number;         // renamed from attachmentSize in schema
   mimeType: string;
-  parentV1ObjectID: string;
+  parentDisplayId: string;  // Same in V1 and V2 (DTT preserves it)
   errorStep: ErrorStep;
   errorMessage: string;
   retryCount: number;
   createdAt: string;
   resolvedAt: string | null;
+  // Legacy aliases for backward compatibility in UI
+  attachmentName?: string;
+  attachmentSize?: number;
 }
 
 export interface LeadAttachmentAuditLog {
@@ -88,4 +90,27 @@ export interface BatchConfig {
   delayBetweenBatches: number;
   delayBetweenRecords: number;
   isActive: boolean;
+}
+
+/**
+ * Options for triggering migration with filters
+ */
+export interface MigrationTriggerOptions {
+  objectType?: string;      // LEAD_ATTACHMENT, TICKET_ATTACHMENT, etc.
+  mode?: string;            // FULL, DELTA, ATTACHMENT_ONLY
+  parentId?: string;        // V1 Lead ID (displayId) - filter specific lead
+  createdFrom?: string;     // ISO date YYYY-MM-DD - filter by creation date
+  createdTo?: string;       // ISO date YYYY-MM-DD - filter by creation date
+  maxRecords?: number;      // Limit records (for testing)
+}
+
+/**
+ * Response from migration trigger
+ */
+export interface MigrationTriggerResponse {
+  status: 'accepted' | 'busy' | 'error';
+  runId?: string;
+  message: string;
+  objectType?: string;
+  currentRunId?: string;    // When status is 'busy'
 }

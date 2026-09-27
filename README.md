@@ -1,37 +1,96 @@
 # V2 Lead Attachment Migration
 
-SAP CAP application for migrating Lead Attachments from SAP C4C V1 to SAP Sales/Service Cloud V2.
+SAP CAP application for migrating **Attachments** from SAP C4C V1 to SAP Sales/Service Cloud V2.
+
+## Important: DTT vs This Tool
+
+| What | Migrated By |
+|------|-------------|
+| **Leads, Tickets, Accounts, Contacts** | DTT (Data Transfer Tool) |
+| **Attachments** (Lead, Ticket, etc.) | **This Application** |
+
+**Key Point**: DTT preserves the `displayId` when migrating objects. So:
+- V1 `Lead.ID` = V2 `Lead.displayId`
+- No ID mapping is needed - we look up V2 objects by `displayId`
 
 ## Architecture
 
-This project uses a **reusable migration framework** that can be extended for other object types.
+### Key Features
+
+- **Attachment-Only Migration**: Migrates attachments for objects already in V2 (via DTT)
+- **Duplicate Detection**: Multi-level checks (audit log → filename → content hash → V2 API)
+- **V2 Document Service**: Proper 4-step upload flow (create metadata → S3 upload → verify → link)
+- **Parent Tracking**: Tracks migration progress per parent (Lead, Ticket, etc.)
 
 ### CDS Schema Structure
 
 ```
 db/
-├── common/
-│   ├── types.cds       # Reusable enums (MigrationStatus, ObjectType, ErrorStep, etc.)
-│   └── aspects.cds     # Reusable aspects (timestamped, v1Source, v2Target, errorTracked)
-├── base/
-│   └── migration-base.cds  # Generic entities (Checkpoint, RunHistory, BatchConfig, etc.)
-├── lead/
-│   └── lead-attachment.cds # Lead-specific entities (LeadAttachmentAuditLog, etc.)
-└── index.cds           # Main entry point
+└── schema.cds
+    ├── Types & Enums         # MigrationStatus, ObjectType (attachment types only), ErrorStep
+    ├── Aspects               # timestamped, v1Source, v2Target, parentRef, attachmentMeta
+    ├── Base Entities         # Checkpoint, RunHistory, BatchConfig, MappingConfig
+    ├── Generic Entities      # ObjectAuditLog, ObjectFailedRecord, ObjectQueue
+    ├── ParentMigrationStatus # Track attachment progress per parent (Lead, Ticket)
+    └── Views                 # LeadAttachmentAuditLog, LeadMigrationProgress, etc.
 ```
 
-### Reusability
+### Service Layer
 
-The `common/` and `base/` folders contain generic migration framework components that can be reused:
+```
+srv/
+├── migration-service.cds    # CAP service definition
+├── migration-service.js     # Service handlers
+└── migration/
+    ├── MigrationJob.js              # Core migration orchestration
+    ├── CheckpointService.js         # State management & audit logging
+    ├── DuplicateDetectionService.js # Prevent re-migration
+    ├── FieldMappingService.js       # Field transformation (optional)
+    ├── V2DocumentService.js         # V2 4-step upload flow (generic)
+    ├── V2LeadClient.js              # Lead-specific V2 operations
+    ├── V1LeadClient.js              # V1 Lead/Attachment fetch
+    └── DestinationService.js        # BTP destination resolution
+```
 
-- **Types**: `MigrationStatus`, `ObjectType`, `MigrationMode`, `ErrorStep`, `TriggerSource`
-- **Aspects**: `timestamped`, `v1Source`, `v2Target`, `errorTracked`, `attachmentMeta`
-- **Base Entities**: `Checkpoint`, `FailedRecord`, `AuditLog`, `RunHistory`, `BatchConfig`
+### V2 Document Service Upload Flow
 
-To create a new migration (e.g., Ticket Attachments):
-1. Copy `common/` and `base/` folders
-2. Create new object-specific folder (e.g., `ticket/`)
-3. Extend base entities with object-specific fields
+The V2 API requires a 4-step process for uploading attachments:
+
+```
+Step 1: POST /document-service/documents
+        → Create metadata, get uploadUrl (S3 pre-signed URL)
+
+Step 2: PUT {uploadUrl}
+        → Upload binary content to S3 (NO authentication)
+
+Step 3: GET /document-service/documents/{id}
+        → Verify status is ACTIVE (retry until ready)
+
+Step 4: PATCH /lead-service/leads/{id}
+        → Link document to Lead (or other entity)
+```
+
+### Migration Flow
+
+```
+1. Fetch Leads with attachments from V1
+2. For each Lead:
+   a. Find V2 Lead by displayId (same as V1 LeadID)
+   b. If V2 Lead not found → skip all attachments
+   c. For each attachment:
+      - Check if already migrated (audit log, filename, hash)
+      - Download from V1
+      - Upload to V2 (4-step document service)
+      - Record success/failure
+```
+
+### Adding New Object Types
+
+To add migration for Ticket Attachments:
+
+1. **No schema changes** - use `objectType = 'TICKET_ATTACHMENT'`
+2. Create `V2TicketClient.js` with entity config: `{ entityService: 'case-service', entityPath: 'cases' }`
+3. Update `MigrationJob.js` to handle the new type
 
 ## Setup
 
