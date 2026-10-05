@@ -3,8 +3,6 @@
 ## Documentation
 
 **Version:** 1.0  
-**Last Updated:** September 2026  
-**Author:** SAP CX Migration Team
 
 ---
 
@@ -37,9 +35,7 @@ The **V1 to V2 Lead Attachment Migration Tool** is a specialized utility designe
 
 ### 1.3 Target Audience
 
-- **Migration Project Managers** - Understanding the overall approach
 - **Technical Consultants** - Implementing and configuring the tool
-- **System Administrators** - Deploying and monitoring migration runs
 - **Developers** - Extending the tool for additional object types
 
 ### 1.4 Key Assumption
@@ -88,12 +84,7 @@ Web links use a simplified 2-step flow (no binary upload to S3).
 
 The SAP Data Transfer Tool (DTT) has limitations:
 
-- Does NOT migrate attachments
-- Does NOT migrate notes/activities attachments
-- Preserves displayId for object correlation
-- Handles complex relationship mappings
-
-This tool fills the attachment migration gap left by DTT.
+- Does NOT migrate Lead attachments
 
 ---
 
@@ -225,10 +216,6 @@ Failed:       47 (1.2%)
 
 ### 5.3 Future Extensibility
 
-The architecture supports additional object types:
-- TICKET_ATTACHMENT - Phase 2
-- ACCOUNT_ATTACHMENT - Phase 3
-- CONTACT_ATTACHMENT - Phase 3
 
 ### 5.4 Recommendations
 

@@ -38,7 +38,6 @@ class V2DocumentService {
         this.baseUrl = baseUrl; this.user = user; this.password = password;
 
         const url = `${this.baseUrl}/sap/c4c/api/v1/document-service/documents`;
-        console.log(`[V2DocumentService] Step 1: Creating document metadata for "${fileName}"`);
 
         const response = await fetch(url, {
             method: 'POST',
@@ -54,13 +53,11 @@ class V2DocumentService {
 
         const data = await response.json();
         const doc = data.value || data;
-        console.log(`[V2DocumentService] Document created: ID=${doc.id}, status=${doc.status}`);
         return { documentId: doc.id, uploadUrl: doc.uploadUrl, status: doc.status };
     }
 
     /** Step 2: Upload file content to S3 pre-signed URL (NO AUTH) */
     async uploadContentToS3(uploadUrl, content, mimeType = 'application/octet-stream') {
-        console.log(`[V2DocumentService] Step 2: Uploading content to S3 (${content.length} bytes)`);
 
         const response = await fetch(uploadUrl, {
             method: 'PUT',
@@ -73,7 +70,6 @@ class V2DocumentService {
             err.step = 'UPLOAD_TO_S3';
             throw err;
         }
-        console.log(`[V2DocumentService] Content uploaded successfully to S3`);
         return true;
     }
 
@@ -102,7 +98,6 @@ class V2DocumentService {
 
     /** Step 3 with retry: Wait for document to become ACTIVE */
     async waitForDocumentActive(documentId, maxRetries = VERIFY_MAX_RETRIES, delayMs = VERIFY_RETRY_DELAY_MS) {
-        console.log(`[V2DocumentService] Step 3: Verifying document status...`);
         let lastStatus = 'UNKNOWN';
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -110,10 +105,9 @@ class V2DocumentService {
             lastStatus = docStatus.status;
 
             if (docStatus.status === 'ACTIVE') {
-                console.log(`[V2DocumentService] Document is ACTIVE (fileSize: ${docStatus.fileSize} bytes)`);
                 return docStatus;
             }
-            console.log(`[V2DocumentService] Status: ${docStatus.status}, waiting... (${attempt}/${maxRetries})`);
+
             await this._sleep(delayMs);
         }
 
@@ -130,7 +124,6 @@ class V2DocumentService {
         const url = `${this.baseUrl}/sap/c4c/api/v1/${entityService}/${entityPath}/${entityId}`;
         
         // Step 4a: GET entity to retrieve current ETag (required for PATCH)
-        console.log(`[V2DocumentService] Step 4a: Getting ETag for ${entityPath}/${entityId}`);
         const getResponse = await fetch(url, {
             method: 'GET',
             headers: { 'Authorization': this._getAuthHeader(), 'Accept': 'application/json' }
@@ -144,14 +137,12 @@ class V2DocumentService {
         }
         
         const etag = getResponse.headers.get('ETag');
-        console.log(`[V2DocumentService] ETag retrieved: ${etag}`);
         
         if (!etag) {
             console.warn(`[V2DocumentService] Warning: No ETag returned, proceeding with '*'`);
         }
 
         // Step 4b: PATCH with If-Match header to link document
-        console.log(`[V2DocumentService] Step 4b: Linking document ${documentId} to ${entityPath}/${entityId}`);
         const patchResponse = await fetch(url, {
             method: 'PATCH',
             headers: { 
@@ -172,7 +163,6 @@ class V2DocumentService {
 
         const data = await patchResponse.json();
         const entity = data.value || data;
-        console.log(`[V2DocumentService] Document linked. Total attachments: ${entity.attachments?.length || 0}`);
         return { success: true, entityId: entity.id, displayId: entity.displayId, attachments: entity.attachments || [] };
     }
 
@@ -194,7 +184,6 @@ class V2DocumentService {
         const linkResult = await this.linkDocumentToEntity(entityService, entityPath, entityId, documentId);
 
         const durationMs = Date.now() - startTime;
-        console.log(`[V2DocumentService] Upload complete: ${fileName} → ${entityPath}/${entityId} (${durationMs}ms)`);
 
         return {
             documentId,
@@ -213,7 +202,6 @@ class V2DocumentService {
         this.baseUrl = baseUrl; this.user = user; this.password = password;
 
         const url = `${this.baseUrl}/sap/c4c/api/v1/${entityService}/${entityPath}/${entityId}?$select=attachments`;
-        console.log(`[V2DocumentService] Fetching attachments: ${url}`);
         
         const response = await fetch(url, {
             method: 'GET',
@@ -225,9 +213,7 @@ class V2DocumentService {
             return [];
         }
         const data = await response.json();
-        const attachments = (data.value || data).attachments || [];
-        console.log(`[V2DocumentService] Entity ${entityId} has ${attachments.length} attachments`);
-        return attachments;
+        return (data.value || data).attachments || [];
     }
 
     /** Check if attachment exists by filename */
@@ -250,7 +236,6 @@ class V2DocumentService {
         this.baseUrl = baseUrl; this.user = user; this.password = password;
 
         const apiUrl = `${this.baseUrl}/sap/c4c/api/v1/document-service/documents`;
-        console.log(`[V2DocumentService] Creating web link: "${title}" → ${url}`);
 
         const response = await fetch(apiUrl, {
             method: 'POST',
@@ -272,7 +257,6 @@ class V2DocumentService {
 
         const data = await response.json();
         const doc = data.value || data;
-        console.log(`[V2DocumentService] Web link created: ID=${doc.id}, status=${doc.status || 'N/A'}`);
         return { documentId: doc.id, status: doc.status };
     }
 
@@ -297,7 +281,6 @@ class V2DocumentService {
         await this.linkDocumentToEntity(entityService, entityPath, entityId, documentId);
 
         const durationMs = Date.now() - startTime;
-        console.log(`[V2DocumentService] Web link complete: ${title} → ${entityPath}/${entityId} (${durationMs}ms)`);
 
         return {
             documentId,

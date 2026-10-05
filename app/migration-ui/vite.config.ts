@@ -2,9 +2,13 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
-// For local dev via CAP: npm run build:local
+// For local dev via CAP: npm run build:local or build:local:win
 // For BTP deployment: npm run build (defaults to production path)
-const isCapLocal = process.env.BUILD_FOR_CAP === 'true' || process.env.npm_lifecycle_event === 'build:local';
+const buildForCap = process.env.BUILD_FOR_CAP?.trim() === 'true';
+const isLocalBuild = process.env.npm_lifecycle_event?.includes('local');
+const isCapLocal = buildForCap || isLocalBuild;
+
+console.log(`[vite.config] BUILD_FOR_CAP="${process.env.BUILD_FOR_CAP}", npm_lifecycle_event=${process.env.npm_lifecycle_event}, isCapLocal=${isCapLocal}`);
 
 export default defineConfig({
   plugins: [react()],

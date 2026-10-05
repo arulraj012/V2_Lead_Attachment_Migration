@@ -107,7 +107,7 @@ entity Checkpoint {
     cursorCreationDateTime    : Timestamp;        // Last processed Lead's CreationDateTime
     cursorPosition            : Integer default 0; // Total leads processed (for progress %)
     
-    // Run configuration (persisted for resume)
+    // Run configuration (persisted)
     filterCreatedFrom         : Date;             // Date range start
     filterCreatedTo           : Date;             // Date range end
     totalLeadsInRange         : Integer;          // For progress calculation
@@ -137,14 +137,18 @@ entity RunHistory : timestamped {
 }
 
 entity BatchConfig : timestamped {
-    key objectType        : ObjectType;
-    batchSize             : Integer default 10;
-    maxRecordsPerRun      : Integer default 500;
-    delayBetweenBatches   : Integer default 1000;
-    delayBetweenRecords   : Integer default 200;
-    isActive              : Boolean default true;
-    retryMaxAttempts      : Integer default 3;
-    retryDelayMs          : Integer default 5000;
+    key objectType          : ObjectType;
+    batchSize               : Integer default 10;
+    maxRecordsPerRun        : Integer default 500;
+    maxLeadsPerRun          : Integer default 50;          // Leads per migration run
+    attachmentConcurrency   : Integer default 5;           // Parallel attachment uploads per lead
+    delayBetweenBatches     : Integer default 1000;
+    delayBetweenRecords     : Integer default 200;
+    delayBetweenLeads       : Integer default 500;         // Ms delay between leads
+    delayBetweenAttachments : Integer default 100;         // Ms delay between attachments
+    isActive                : Boolean default true;
+    retryMaxAttempts        : Integer default 3;
+    retryDelayMs            : Integer default 5000;
 }
 
 entity MappingConfig : timestamped {
@@ -220,11 +224,11 @@ entity ParentMigrationStatus : timestamped {
     parentV2ObjectID    : String(40);           // Cached V2 UUID for performance
     v2Validated         : Boolean default false; // Confirmed parent exists in V2
     status              : LeadProcessingStatus default 'PENDING';  // Processing status
-    attachmentsMigrated : Integer default 0;
-    attachmentsPending  : Integer default 0;
-    attachmentsFailed   : Integer default 0;
-    attachmentsSkipped  : Integer default 0;    // Already existed in V2
-    totalAttachments    : Integer default 0;    // Total attachments for this lead
+    migrated            : Integer default 0;
+    pending             : Integer default 0;
+    failed              : Integer default 0;
+    skipped             : Integer default 0;    // Already existed in V2
+    total               : Integer default 0;    // Total items for this parent
     lastProcessedAt     : Timestamp;
     processedInRunId    : UUID;                 // Which run processed this lead
     v1CreationDateTime  : Timestamp;            // For cursor ordering
@@ -267,8 +271,8 @@ view LeadMigrationProgress as
         key parentDisplayId as leadDisplayId,
         parentV2ObjectID as v2LeadId,
         v2Validated as leadExistsInV2,
-        attachmentsMigrated, 
-        attachmentsPending, 
-        attachmentsFailed,
+        migrated, 
+        pending, 
+        failed,
         lastProcessedAt
     } where objectType = 'LEAD_ATTACHMENT';

@@ -37,7 +37,6 @@ class V2LeadClient {
         this.baseUrl = baseUrl; this.user = user; this.password = password;
 
         const url = `${this.baseUrl}/sap/c4c/api/v1/lead-service/leads?$filter=displayId eq '${encodeURIComponent(displayId)}'`;
-        console.log(`[V2LeadClient] Finding V2 lead by displayId: ${url}`);
         
         const response = await fetch(url, {
             method: 'GET',
@@ -52,13 +51,6 @@ class V2LeadClient {
 
         const data = await response.json();
         const leads = data.value || [];
-        console.log(`[V2LeadClient] Found ${leads.length} V2 lead(s) for displayId=${displayId}`);
-        
-        if (leads.length > 0) {
-            const lead = leads[0];
-            console.log(`[V2LeadClient] V2 Lead details: id=${lead.id}, displayId=${lead.displayId}, attachments=${lead.attachments?.length || 0}`);
-        }
-        
         return leads.length > 0 ? leads[0] : null;
     }
 
@@ -84,7 +76,6 @@ class V2LeadClient {
      * @returns {Promise<{attachmentId: string, durationMs: number}>}
      */
     async uploadAttachment(leadId, attachmentData) {
-        console.log(`[V2LeadClient] Uploading attachment "${attachmentData.fileName}" to lead ${leadId}`);
 
         try {
             // Use the 4-step document-service API flow
@@ -129,14 +120,12 @@ class V2LeadClient {
      * Check if attachment with given filename exists on Lead
      */
     async attachmentExists(leadId, fileName) {
-        console.log(`[V2LeadClient] Checking if attachment "${fileName}" exists on lead ${leadId}`);
         const result = await this._documentService.attachmentExistsByName(
             LEAD_ENTITY_SERVICE,
             LEAD_ENTITY_PATH,
             leadId,
             fileName
         );
-        console.log(`[V2LeadClient] Attachment "${fileName}" exists: ${result.exists}${result.documentId ? ` (docId: ${result.documentId})` : ''}`);
         return result.exists;
     }
 
@@ -144,12 +133,7 @@ class V2LeadClient {
      * Get all attachments for debugging
      */
     async debugListAttachments(leadId) {
-        const attachments = await this.getLeadAttachments(leadId);
-        console.log(`[V2LeadClient] Lead ${leadId} has ${attachments.length} attachment(s):`);
-        attachments.forEach((att, i) => {
-            console.log(`  ${i + 1}. ${att.fileName || att.title || 'unnamed'} (id: ${att.id}, status: ${att.status || 'N/A'})`);
-        });
-        return attachments;
+        return this.getLeadAttachments(leadId);
     }
 
     /**
@@ -160,7 +144,6 @@ class V2LeadClient {
      * @returns {Promise<{attachmentId: string, durationMs: number}>}
      */
     async uploadWebLink(leadId, linkData) {
-        console.log(`[V2LeadClient] Creating web link "${linkData.title}" → ${linkData.url} on lead ${leadId}`);
 
         try {
             const result = await this._documentService.createAndLinkWebLink(

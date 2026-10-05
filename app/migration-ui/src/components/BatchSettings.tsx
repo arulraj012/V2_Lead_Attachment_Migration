@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Card, CardHeader, FlexBox, Input, Button, Label, Switch, MessageStrip } from "@ui5/webcomponents-react";
+import { Card, CardHeader, FlexBox, Input, Button, Label, MessageStrip, Text } from "@ui5/webcomponents-react";
 import { getBatchConfig, updateBatchConfig } from "../services/migrationApi";
 import type { BatchConfig } from "../types/migration";
 
@@ -48,58 +48,60 @@ export function BatchSettings() {
   }
 
   return (
-    <Card header={<CardHeader titleText="Batch Processing Configuration" subtitleText="Configure migration batch settings" />}>
-      <FlexBox direction="Column" style={{ padding: "1rem", gap: "1rem" }}>
+    <Card header={<CardHeader titleText="Migration Configuration" subtitleText="Configure batch processing and API throttling" />}>
+      <FlexBox direction="Column" style={{ padding: "1rem", gap: "1.25rem" }}>
         {message && (
           <MessageStrip design={message.type} hideCloseButton>{message.text}</MessageStrip>
         )}
 
-        <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
-          <Label>Batch Size</Label>
+        {/* Batch Processing Section */}
+        <Text style={{ fontWeight: "bold", fontSize: "0.875rem", color: "#666" }}>Batch Processing</Text>
+        
+        <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
+          <Label>Max Leads Per Run</Label>
           <Input
             type="Number"
-            value={String(config.batchSize)}
-            onChange={(e) => setConfig({ ...config, batchSize: parseInt((e.target as unknown as { value: string }).value) || 10 })}
+            value={String(config.maxLeadsPerRun || 50)}
+            onChange={(e) => setConfig({ ...config, maxLeadsPerRun: parseInt((e.target as unknown as { value: string }).value) || 50 })}
             style={{ width: "200px" }}
           />
+          <Text style={{ fontSize: "0.75rem", color: "#888" }}>Number of leads to process per migration run (1-200)</Text>
         </FlexBox>
 
-        <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
-          <Label>Max Records Per Run</Label>
+        <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
+          <Label>Attachment Concurrency</Label>
           <Input
             type="Number"
-            value={String(config.maxRecordsPerRun)}
-            onChange={(e) => setConfig({ ...config, maxRecordsPerRun: parseInt((e.target as unknown as { value: string }).value) || 100 })}
+            value={String(config.attachmentConcurrency || 5)}
+            onChange={(e) => setConfig({ ...config, attachmentConcurrency: parseInt((e.target as unknown as { value: string }).value) || 5 })}
             style={{ width: "200px" }}
           />
+          <Text style={{ fontSize: "0.75rem", color: "#888" }}>Parallel attachment uploads per lead (1-10)</Text>
         </FlexBox>
 
-        <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
-          <Label>Delay Between Batches (ms)</Label>
+        {/* API Throttling Section */}
+        <Text style={{ fontWeight: "bold", fontSize: "0.875rem", color: "#666", marginTop: "0.5rem" }}>API Throttling</Text>
+
+        <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
+          <Label>Delay Between Leads (ms)</Label>
           <Input
             type="Number"
-            value={String(config.delayBetweenBatches)}
-            onChange={(e) => setConfig({ ...config, delayBetweenBatches: parseInt((e.target as unknown as { value: string }).value) || 1000 })}
+            value={String(config.delayBetweenLeads ?? 500)}
+            onChange={(e) => setConfig({ ...config, delayBetweenLeads: parseInt((e.target as unknown as { value: string }).value) || 0 })}
             style={{ width: "200px" }}
           />
+          <Text style={{ fontSize: "0.75rem", color: "#888" }}>Wait time after processing each lead (0 = no delay)</Text>
         </FlexBox>
 
-        <FlexBox direction="Column" style={{ gap: "0.5rem" }}>
-          <Label>Delay Between Records (ms)</Label>
+        <FlexBox direction="Column" style={{ gap: "0.25rem" }}>
+          <Label>Delay Between Attachments (ms)</Label>
           <Input
             type="Number"
-            value={String(config.delayBetweenRecords)}
-            onChange={(e) => setConfig({ ...config, delayBetweenRecords: parseInt((e.target as unknown as { value: string }).value) || 100 })}
+            value={String(config.delayBetweenAttachments ?? 100)}
+            onChange={(e) => setConfig({ ...config, delayBetweenAttachments: parseInt((e.target as unknown as { value: string }).value) || 0 })}
             style={{ width: "200px" }}
           />
-        </FlexBox>
-
-        <FlexBox alignItems="Center" style={{ gap: "0.75rem" }}>
-          <Switch
-            checked={config.isActive}
-            onChange={(e) => setConfig({ ...config, isActive: (e.target as unknown as { checked: boolean }).checked })}
-          />
-          <Label>Migration Active</Label>
+          <Text style={{ fontSize: "0.75rem", color: "#888" }}>Wait time between attachment uploads (0 = no delay)</Text>
         </FlexBox>
 
         <FlexBox style={{ marginTop: "1rem" }}>

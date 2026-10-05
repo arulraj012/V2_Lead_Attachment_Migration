@@ -12,6 +12,12 @@ build-parameters:
       commands:
         - npm ci
         - npx cds build --production
+        - npx shx cp gen/db/src/gen/.hdiconfig gen/db/src/
+        - npx shx cp gen/db/src/gen/.hdinamespace gen/db/src/
+        - npx shx cp gen/db/src/gen/*.hdbtable gen/db/src/
+        - npx shx cp gen/db/src/gen/*.hdbview gen/db/src/
+        - npx shx rm -rf gen/db/src/gen
+        - npx shx cp db/undeploy.json gen/db/
 
 modules:
   # ============================================================

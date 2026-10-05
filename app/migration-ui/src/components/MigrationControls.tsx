@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Button, Input, FlexBox, MessageStrip, DatePicker, Label, Panel } from "@ui5/webcomponents-react";
 import { useMigrationActions } from "../hooks/useMigrationActions";
 import type { MigrationTriggerOptions } from "../types/migration";
@@ -53,6 +53,10 @@ export function MigrationControls({ isRunning, pendingFailed, onRefresh }: Props
   const dis = isRunning||isTriggering||isTesting;
   const canStart = isValidFilter() && !dis;
   const show = mode!=='idle';
+  
+  // Mutual exclusion: Lead ID vs Date Range
+  const hasLeadId = leadId.trim() !== '';
+  const hasDateRange = from !== '' || to !== '';
 
   return (
     <FlexBox direction="Column" style={{gap:"1rem"}}>
@@ -69,9 +73,9 @@ export function MigrationControls({ isRunning, pendingFailed, onRefresh }: Props
         <Panel headerText={mode==='run'?'Run Migration - Filters':'Test Migration - Filters'} collapsed={false}>
           <FlexBox direction="Column" style={{gap:"1rem",padding:"0.5rem 0"}}>
             <FlexBox style={{gap:"1rem",flexWrap:"wrap",alignItems:"flex-end"}}>
-              <div><Label showColon>Lead ID</Label><Input value={leadId} placeholder="V1 displayId" style={{width:"180px",marginTop:"0.25rem"}} onInput={e=>setLeadId((e.target as any).value)}/></div>
-              <div><Label showColon>From</Label><DatePicker value={from} placeholder="Start" style={{width:"140px",marginTop:"0.25rem"}} onChange={e=>setFrom((e.target as any).value)}/></div>
-              <div><Label showColon>To</Label><DatePicker value={to} placeholder="End" style={{width:"140px",marginTop:"0.25rem"}} onChange={e=>setTo((e.target as any).value)}/></div>
+              <div><Label showColon>Lead ID</Label><Input value={leadId} placeholder="V1 displayId" disabled={hasDateRange} style={{width:"180px",marginTop:"0.25rem"}} onInput={e=>setLeadId((e.target as any).value)}/></div>
+              <div><Label showColon>From</Label><DatePicker value={from} placeholder="Start" disabled={hasLeadId} style={{width:"140px",marginTop:"0.25rem"}} onChange={e=>setFrom((e.target as any).value)}/></div>
+              <div><Label showColon>To</Label><DatePicker value={to} placeholder="End" disabled={hasLeadId} style={{width:"140px",marginTop:"0.25rem"}} onChange={e=>setTo((e.target as any).value)}/></div>
               <div><Label showColon>Max</Label><Input value={max} placeholder={mode==='test'?"5":"all"} type="Number" style={{width:"80px",marginTop:"0.25rem"}} onInput={e=>setMax((e.target as any).value)}/></div>
               {has && <Button design="Transparent" onClick={clear}>Clear</Button>}
             </FlexBox>

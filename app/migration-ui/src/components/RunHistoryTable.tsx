@@ -23,10 +23,27 @@ function truncateError(msg: string | null | undefined, maxLen: number = 40): str
   return msg.length > maxLen ? msg.substring(0, maxLen - 3) + "..." : msg;
 }
 
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text).catch(() => {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textArea);
+  });
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const columns: AnalyticalTableColumnDefinition[] = [
-  { Header: "Run ID", accessor: "runId", width: 90, Cell: (instance: any) => (
-    <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{instance.value?.substring(0, 8)}...</span>
+  { Header: "Run ID", accessor: "runId", width: 100, Cell: (instance: any) => (
+    <span 
+      style={{ fontFamily: "monospace", fontSize: "0.75rem", cursor: "pointer", textDecoration: "underline dotted" }} 
+      title={`Click to copy: ${instance.value}`}
+      onClick={() => copyToClipboard(instance.value)}
+    >
+      {instance.value?.substring(0, 8)}...
+    </span>
   )},
   { Header: "Mode", accessor: "mode", width: 80 },
   { Header: "Status", accessor: "status", width: 90, Cell: (instance: any) => (
@@ -34,19 +51,19 @@ const columns: AnalyticalTableColumnDefinition[] = [
   )},
   { Header: "Started", accessor: "startedAt", width: 130, Cell: (instance: any) => formatDateTime(instance.value) },
   { Header: "Duration", accessor: "durationMs", width: 70, Cell: (instance: any) => formatDuration(instance.value) },
-  { Header: "Total", accessor: "total", width: 45, hAlign: "End", Cell: (instance: any) => {
+  { Header: "Total", accessor: "total", width: 50, Cell: (instance: any) => {
     const row = instance.row.original;
     const total = (row.migrated || 0) + (row.failed || 0) + (row.skipped || 0);
-    return <span style={{ fontWeight: "500", textAlign: "right", display: "block" }}>{total}</span>;
+    return <span style={{ fontWeight: "500" }}>{total}</span>;
   }},
-  { Header: "Migrated", accessor: "migrated", width: 55, hAlign: "End", Cell: (instance: any) => (
-    <span style={{ color: "var(--sapPositiveColor)", textAlign: "right", display: "block" }}>{instance.value}</span>
+  { Header: "Migrated", accessor: "migrated", width: 65, Cell: (instance: any) => (
+    <span style={{ color: "var(--sapPositiveColor)" }}>{instance.value}</span>
   )},
-  { Header: "Skipped", accessor: "skipped", width: 50, hAlign: "End", Cell: (instance: any) => (
-    <span style={{ color: instance.value > 0 ? "var(--sapCriticalColor)" : undefined, textAlign: "right", display: "block" }}>{instance.value || 0}</span>
+  { Header: "Skipped", accessor: "skipped", width: 60, Cell: (instance: any) => (
+    <span style={{ color: instance.value > 0 ? "var(--sapCriticalColor)" : undefined }}>{instance.value || 0}</span>
   )},
-  { Header: "Failed", accessor: "failed", width: 45, hAlign: "End", Cell: (instance: any) => (
-    <span style={{ color: instance.value > 0 ? "var(--sapNegativeColor)" : undefined, textAlign: "right", display: "block" }}>{instance.value}</span>
+  { Header: "Failed", accessor: "failed", width: 50, Cell: (instance: any) => (
+    <span style={{ color: instance.value > 0 ? "var(--sapNegativeColor)" : undefined }}>{instance.value}</span>
   )},
   { Header: "Error", accessor: "errorMessage", width: 180, Cell: (instance: any) => (
     instance.value ? (

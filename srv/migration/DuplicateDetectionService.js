@@ -97,7 +97,7 @@ class DuplicateDetectionService {
         if (v1ObjectID) {
             const byId = await this.isAlreadyMigrated(objectType, v1ObjectID);
             if (byId.migrated) {
-                return { skip: true, reason: 'ALREADY_MIGRATED_BY_ID', existingV2ID: byId.v2ObjectID };
+                return { skip: true, reason: 'MIGRATED_BY_ID', existingV2ID: byId.v2ObjectID };
             }
         }
 
@@ -105,7 +105,7 @@ class DuplicateDetectionService {
         if (parentDisplayId && fileName) {
             const byName = await this.isAttachmentMigratedByName(objectType, parentDisplayId, fileName);
             if (byName.migrated) {
-                return { skip: true, reason: 'ALREADY_MIGRATED_BY_NAME', existingV2ID: byName.v2ObjectID };
+                return { skip: true, reason: 'MIGRATED_BY_NAME', existingV2ID: byName.v2ObjectID };
             }
         }
 
@@ -114,7 +114,7 @@ class DuplicateDetectionService {
             const hash = this.computeContentHash(content);
             const byHash = await this.isContentAlreadyMigrated(objectType, hash, parentDisplayId);
             if (byHash.migrated) {
-                return { skip: true, reason: 'ALREADY_MIGRATED_BY_CONTENT', existingV2ID: byHash.v2ObjectID };
+                return { skip: true, reason: 'MIGRATED_BY_HASH', existingV2ID: byHash.v2ObjectID };
             }
         }
 

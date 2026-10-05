@@ -52,8 +52,7 @@ class MigrationService extends cds.ApplicationService {
         const runId = lockResult.runId;
         (async () => {
             try {
-                const result = await runMigration(filters, runId);
-                console.log(`[MigrationService] Run ${runId} completed:`, JSON.stringify(result));
+                await runMigration(filters, runId);
             } catch (err) {
                 console.error(`[MigrationService] Run ${runId} failed: ${err.message}`);
             }
@@ -68,7 +67,6 @@ class MigrationService extends cds.ApplicationService {
         const objectType = req.data?.objectType || OBJECT_TYPE;
         const cp = await checkpoint.getCheckpoint(objectType);
         const pendingFailed = await checkpoint.getUnresolvedFailedCount(objectType);
-        const pendingInQueue = await checkpoint.getPendingQueueCount(objectType);
         
         return {
             objectType,
@@ -77,7 +75,6 @@ class MigrationService extends cds.ApplicationService {
             lastSuccessAt: cp?.lastSuccessAt,
             totalMigrated: cp?.totalMigrated || 0,
             pendingFailed,
-            pendingInQueue,
             isActive: true,
             lastRunId: cp?.lastRunId,
             lastRunMode: cp?.lastRunMode,
@@ -114,6 +111,13 @@ class MigrationService extends cds.ApplicationService {
             const v1Client = new V1LeadClient();
             const v2Client = new V2LeadClient();
 
+            // Find V1 Lead by displayId (needed for download URL)
+            const v1Lead = await v1Client.findLeadByDisplayId(failedRecord.parentDisplayId);
+            if (!v1Lead) {
+                await checkpoint.incrementRetryCount(recordId, `V1 Lead not found: ${failedRecord.parentDisplayId}`);
+                return JSON.stringify({ status: 'failed', message: 'V1 Lead not found', recordId });
+            }
+
             // Find V2 Lead by displayId (DTT preserves it)
             const v2Lead = await v2Client.findLeadByDisplayId(failedRecord.parentDisplayId);
             if (!v2Lead) {
@@ -121,8 +125,8 @@ class MigrationService extends cds.ApplicationService {
                 return JSON.stringify({ status: 'failed', message: 'V2 Lead not found', recordId });
             }
 
-            // Download from V1
-            const { buffer, durationMs: downloadMs } = await v1Client.downloadAttachment(failedRecord.v1ObjectID);
+            // Download from V1 (requires both attachment ObjectID and Lead ObjectID)
+            const { buffer, durationMs: downloadMs } = await v1Client.downloadAttachment(failedRecord.v1ObjectID, v1Lead.objectId);
             const contentHash = duplicateDetection.computeContentHash(buffer);
 
             // Upload to V2
@@ -223,9 +227,22 @@ class MigrationService extends cds.ApplicationService {
     }
 
     async handleUpdateBatchConfig(req) {
-        const { objectType, batchSize, maxRecordsPerRun, delayBetweenBatches, delayBetweenRecords, isActive } = req.data;
-        setBatchConfig({ batchSize, maxRecordsPerRun, delayBetweenBatches, delayBetweenRecords });
-        return JSON.stringify({ status: 'updated', objectType: objectType || OBJECT_TYPE, config: getBatchConfig() });
+        const { objectType, batchSize, maxRecordsPerRun, maxLeadsPerRun, attachmentConcurrency, 
+                delayBetweenBatches, delayBetweenRecords, delayBetweenLeads, delayBetweenAttachments, isActive } = req.data;
+        const targetObjectType = objectType || OBJECT_TYPE;
+        
+        // Update MigrationJob config (in-memory for current session)
+        setMigrationConfig({ maxLeadsPerRun, attachmentConcurrency, delayBetweenLeads, delayBetweenAttachments });
+        
+        // Persist to database (survives app restarts)
+        await checkpoint.updateBatchConfig(targetObjectType, {
+            batchSize, maxRecordsPerRun, maxLeadsPerRun, attachmentConcurrency,
+            delayBetweenBatches, delayBetweenRecords, delayBetweenLeads, delayBetweenAttachments, isActive
+        });
+        
+        // Return merged config (in-memory + DB)
+        const dbConfig = await checkpoint.getBatchConfig(targetObjectType);
+        return JSON.stringify({ status: 'updated', objectType: targetObjectType, config: { ...getBatchConfig(), ...dbConfig } });
     }
 
     async handleGetMappingConfig(req) {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * MigrationJob - V1 to V2 Lead Attachment migration
  * 
  * Features:
@@ -17,7 +17,7 @@ const v1Client = new V1LeadClient();
 const v2Client = new V2LeadClient();
 const OBJECT_TYPE = 'LEAD_ATTACHMENT';
 
-// Default configuration
+// Default configuration (in-memory, loaded from DB on migration start)
 let migrationConfig = {
     maxLeadsPerRun: 50,           // Leads to process per job run
     attachmentConcurrency: 5,     // Parallel attachment uploads per lead
@@ -32,6 +32,28 @@ function setMigrationConfig(config) {
     if (config.attachmentConcurrency) migrationConfig.attachmentConcurrency = Math.max(1, Math.min(10, config.attachmentConcurrency));
     if (config.delayBetweenLeads !== undefined) migrationConfig.delayBetweenLeads = Math.max(0, config.delayBetweenLeads);
     if (config.delayBetweenAttachments !== undefined) migrationConfig.delayBetweenAttachments = Math.max(0, config.delayBetweenAttachments);
+}
+
+/**
+ * Load configuration from database (called at migration start)
+ */
+async function loadConfigFromDb() {
+    try {
+        const dbConfig = await checkpoint.getBatchConfig(OBJECT_TYPE);
+        if (dbConfig) {
+            setMigrationConfig({
+                maxLeadsPerRun: dbConfig.maxLeadsPerRun,
+                attachmentConcurrency: dbConfig.attachmentConcurrency,
+                delayBetweenLeads: dbConfig.delayBetweenLeads,
+                delayBetweenAttachments: dbConfig.delayBetweenAttachments
+            });
+            console.log(`[MigrationJob] Config loaded from DB: maxLeadsPerRun=${migrationConfig.maxLeadsPerRun}, concurrency=${migrationConfig.attachmentConcurrency}`);
+        } else {
+            console.log(`[MigrationJob] No DB config found, using defaults`);
+        }
+    } catch (err) {
+        console.warn(`[MigrationJob] Failed to load config from DB, using defaults: ${err.message}`);
+    }
 }
 
 /**
@@ -79,6 +101,13 @@ async function processLeadAttachments(lead, v2Lead, runId) {
         });
         if (dupCheck.skip) {
             console.log(`[MigrationJob]   - SKIP (${dupCheck.reason}): ${attachment.name}`);
+            // Save skipped attachment to audit log for visibility
+            await checkpoint.saveLeadAttachmentSkipped({
+                parentDisplayId: lead.ID, parentV2ObjectID: v2Lead.id, v1AttachmentID: attachment.objectId,
+                attachmentName: attachment.name, attachmentSize: attachment.isWebLink ? 0 : attachment.sizeInBytes,
+                mimeType: attachment.isWebLink ? 'text/uri-list' : attachment.mimeType,
+                skipReason: dupCheck.reason, runId
+            });
             return { status: 'skipped', reason: dupCheck.reason, attachment };
         }
 
@@ -115,49 +144,78 @@ async function processLeadAttachments(lead, v2Lead, runId) {
  */
 async function runMigration(filterOptions = {}, runId = null) {
     const startTime = Date.now();
-    const { createdFrom, createdTo, maxLeadsPerRun = migrationConfig.maxLeadsPerRun, resetCursor = false } = filterOptions;
+    
+    // Load config from database first (ensures we use persisted settings)
+    await loadConfigFromDb();
+    
+    const { createdFrom, createdTo, maxLeadsPerRun = migrationConfig.maxLeadsPerRun, resetCursor = false, leadId } = filterOptions;
     
     let totalMigrated = 0, totalFailed = 0, totalSkipped = 0, leadsProcessed = 0;
 
     try {
         console.log(`[MigrationJob] Starting migration. RunId: ${runId}`);
-        console.log(`[MigrationJob] Date range: ${createdFrom || 'any'} to ${createdTo || 'any'}`);
-        console.log(`[MigrationJob] Max leads per run: ${maxLeadsPerRun}`);
-
-        // Get total count for progress tracking
-        const totalLeads = await v1Client.countLeadsInRange(createdFrom, createdTo);
+        console.log(`[MigrationJob] Config: maxLeadsPerRun=${maxLeadsPerRun}, concurrency=${migrationConfig.attachmentConcurrency}, delayLeads=${migrationConfig.delayBetweenLeads}ms`);
         
-        // Initialize/update cursor with date range
-        await checkpoint.initializeCursor(OBJECT_TYPE, { createdFrom, createdTo, totalLeadsInRange: totalLeads, resetCursor });
+        let leads = [];
+        
+        // Single lead mode: fetch specific lead by ID (bypasses cursor)
+        if (leadId) {
+            console.log(`[MigrationJob] Single lead mode: fetching lead ${leadId}`);
+            leads = await v1Client.fetchLeads({ leadId });
+            
+            if (leads.length === 0) {
+                console.log(`[MigrationJob] Lead ${leadId} not found in V1 system.`);
+                const durationMs = Date.now() - startTime;
+                await checkpoint.releaseLock(OBJECT_TYPE, 0, 0, durationMs, 0);
+                return { status: 'NOT_FOUND', migrated: 0, failed: 0, skipped: 0, leadsProcessed: 0, durationMs, message: `Lead ${leadId} not found` };
+            }
+            
+            console.log(`[MigrationJob] Found lead ${leadId}: ${leads[0].Name || 'N/A'}`);
+        } else {
+            // Batch mode: use cursor-based pagination
+            console.log(`[MigrationJob] Date range: ${createdFrom || 'any'} to ${createdTo || 'any'}`);
+            console.log(`[MigrationJob] Max leads per run: ${maxLeadsPerRun}`);
 
-        // Get current cursor position
-        const cursor = await checkpoint.getCursor(OBJECT_TYPE);
-        console.log(`[MigrationJob] Cursor position: Lead ${cursor.cursorLeadId || 'START'}, Position ${cursor.cursorPosition}/${totalLeads || '?'}`);
+            // Get total count for progress tracking
+            const totalLeads = await v1Client.countLeadsInRange(createdFrom, createdTo);
+            
+            // Initialize/update cursor with date range
+            await checkpoint.initializeCursor(OBJECT_TYPE, { createdFrom, createdTo, totalLeadsInRange: totalLeads, resetCursor });
 
-        // Fetch next batch of leads using keyset pagination
-        const leads = await v1Client.fetchLeadsAfterCursor({
-            createdFrom, createdTo,
-            afterLeadId: cursor.cursorLeadId,
-            afterCreationDateTime: cursor.cursorCreationDateTime,
-            limit: maxLeadsPerRun
-        });
+            // Get current cursor position
+            const cursor = await checkpoint.getCursor(OBJECT_TYPE);
+            console.log(`[MigrationJob] Cursor position: Lead ${cursor.cursorLeadId || 'START'}, Position ${cursor.cursorPosition}/${totalLeads || '?'}`);
 
-        if (leads.length === 0) {
-            console.log(`[MigrationJob] No more leads to process. Migration complete for this date range.`);
-            const durationMs = Date.now() - startTime;
-            await checkpoint.releaseLock(OBJECT_TYPE, 0, 0, durationMs, 0);
-            return { status: 'COMPLETED', migrated: 0, failed: 0, skipped: 0, leadsProcessed: 0, durationMs, message: 'All leads processed' };
+            // Fetch next batch of leads using keyset pagination
+            leads = await v1Client.fetchLeadsAfterCursor({
+                createdFrom, createdTo,
+                afterLeadId: cursor.cursorLeadId,
+                afterCreationDateTime: cursor.cursorCreationDateTime,
+                limit: maxLeadsPerRun
+            });
+
+            if (leads.length === 0) {
+                console.log(`[MigrationJob] No more leads to process. Migration complete for this date range.`);
+                const durationMs = Date.now() - startTime;
+                await checkpoint.releaseLock(OBJECT_TYPE, 0, 0, durationMs, 0);
+                return { status: 'COMPLETED', migrated: 0, failed: 0, skipped: 0, leadsProcessed: 0, durationMs, message: 'All leads processed' };
+            }
         }
 
-        console.log(`[MigrationJob] Processing ${leads.length} leads...`);
+        console.log(`[MigrationJob] Processing ${leads.length} lead(s)...`);
 
         // Process each lead sequentially (for cursor integrity)
         for (const lead of leads) {
-            // Check if already completed (safety check)
-            const alreadyDone = await checkpoint.isLeadCompleted(OBJECT_TYPE, lead.ID);
-            if (alreadyDone) {
-                console.log(`[MigrationJob] Lead ${lead.ID}: Already completed, skipping`);
-                continue;
+            // Check if already completed (safety check) - but skip this check in single-lead mode
+            // In single-lead mode (leadId provided), we always re-process to allow re-testing
+            if (!leadId) {
+                const alreadyDone = await checkpoint.isLeadCompleted(OBJECT_TYPE, lead.ID);
+                if (alreadyDone) {
+                    console.log(`[MigrationJob] Lead ${lead.ID}: Already completed, skipping`);
+                    totalSkipped++;
+                    leadsProcessed++;
+                    continue;
+                }
             }
 
             // Mark lead as processing
@@ -168,7 +226,12 @@ async function runMigration(filterOptions = {}, runId = null) {
             if (!v2Lead) {
                 console.log(`[MigrationJob] Lead ${lead.ID}: Not found in V2, marking as skipped`);
                 await checkpoint.markLeadSkipped(OBJECT_TYPE, lead.ID);
-                await checkpoint.updateCursor(OBJECT_TYPE, { cursorLeadId: lead.ID, cursorCreationDateTime: lead.CreationDateTime });
+                // Only update cursor in batch mode (not single lead mode)
+                if (!leadId) {
+                    await checkpoint.updateCursor(OBJECT_TYPE, { cursorLeadId: lead.ID, cursorCreationDateTime: lead.CreationDateTime });
+                }
+                totalSkipped++;
+                leadsProcessed++;
                 continue;
             }
 
@@ -180,8 +243,10 @@ async function runMigration(filterOptions = {}, runId = null) {
                 v2LeadId: v2Lead.id, migrated: result.migrated, failed: result.failed, skipped: result.skipped, total: result.total
             });
 
-            // Update cursor (checkpoint after each lead for crash safety)
-            await checkpoint.updateCursor(OBJECT_TYPE, { cursorLeadId: lead.ID, cursorCreationDateTime: lead.CreationDateTime });
+            // Update cursor (checkpoint after each lead for crash safety) - only in batch mode
+            if (!leadId) {
+                await checkpoint.updateCursor(OBJECT_TYPE, { cursorLeadId: lead.ID, cursorCreationDateTime: lead.CreationDateTime });
+            }
 
             totalMigrated += result.migrated;
             totalFailed += result.failed;

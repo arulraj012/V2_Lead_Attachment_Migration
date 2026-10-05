@@ -15,7 +15,6 @@ export interface MigrationStatus {
   lastRunMigrated: number;
   lastRunFailed: number;
   lastRunDurationMs: number;
-  pendingInQueue?: number;
   leadsWithPending?: number;
 }
 
@@ -41,14 +40,14 @@ export interface LeadAttachmentAuditLog {
   ID: string;
   v1ObjectID: string;
   v1DisplayId: string;
-  v1AttachmentID: string;
-  v2ObjectID: string;
-  v2DisplayId: string;
-  v2AttachmentID: string;
-  attachmentName: string;
-  attachmentSize: number;
+  v2ObjectID: string | null;  // null for skipped attachments
+  v2DisplayId: string | null;
+  parentDisplayId: string;    // Lead ID (same in V1 and V2)
+  fileName: string;
+  fileSize: number;
   mimeType: string;
   migrationMode: string;
+  recordSource: string;       // CREATED, EXISTS_IN_V2, etc.
   createdAt: string;
 }
 
@@ -59,9 +58,9 @@ export interface LeadMigrationMapping {
   v2LeadDisplayId: string;
   mappingSource: string;
   isValidated: boolean;
-  attachmentsMigrated: number;
-  attachmentsPending: number;
-  attachmentsFailed: number;
+  migrated: number;
+  pending: number;
+  failed: number;
 }
 
 export interface RunHistory {
@@ -85,11 +84,17 @@ export interface ODataResponse<T> {
 }
 
 export interface BatchConfig {
-  batchSize: number;
-  maxRecordsPerRun: number;
-  delayBetweenBatches: number;
-  delayBetweenRecords: number;
-  isActive: boolean;
+  // Actually used settings (in MigrationJob.js)
+  maxLeadsPerRun: number;         // Leads to process per job run (default: 50)
+  attachmentConcurrency: number;  // Parallel attachment uploads per lead (default: 5)
+  delayBetweenLeads: number;      // Ms delay between leads for API throttling (default: 500)
+  delayBetweenAttachments: number; // Ms delay between attachments (default: 100)
+  // Legacy/DB-backed settings (kept for backward compatibility)
+  batchSize?: number;
+  maxRecordsPerRun?: number;
+  delayBetweenBatches?: number;
+  delayBetweenRecords?: number;
+  isActive?: boolean;
 }
 
 /**

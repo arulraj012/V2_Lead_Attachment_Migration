@@ -7,7 +7,8 @@
     "scripts": {
         "dev": "vite",
         "build": "vite build",
-        "build:local": "set BUILD_FOR_CAP=true&& vite build",
+        "build:local": "cross-env BUILD_FOR_CAP=true vite build",
+        "build:local:win": "set BUILD_FOR_CAP=true&& vite build",
         "preview": "vite preview"
     },
     "dependencies": {
@@ -25,6 +26,7 @@
         "@types/react-dom": "^18.3.0",
         "@vitejs/plugin-react": "^4.3.1",
         "archiver": "^7.0.1",
+        "cross-env": "^10.1.0",
         "typescript": "^5.9.3",
         "vite": "^5.3.3"
     }

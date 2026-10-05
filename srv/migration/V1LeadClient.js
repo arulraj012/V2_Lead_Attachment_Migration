@@ -26,7 +26,7 @@ class V1LeadClient {
         const { baseUrl, user, password } = await this._getCredentials();
         this.baseUrl = baseUrl; this.user = user; this.password = password;
 
-        console.log(`[V1LeadClient] Using credentials: baseUrl=${baseUrl}, user=${user}, password=${password ? '***' : '(empty)'}`);
+        // Credentials loaded from destination/env
 
         const filters = [];
         if (filterOptions.leadId) filters.push(`ID eq '${filterOptions.leadId}'`);
@@ -46,7 +46,6 @@ class V1LeadClient {
         if (filterOptions.maxRecords) queryParams.set('$top', filterOptions.maxRecords.toString());
 
         const url = `${this.baseUrl}/sap/c4c/odata/v1/c4codataapi/LeadCollection?${queryParams}`;
-        console.log(`[V1LeadClient] Fetching leads: ${url}`);
 
         const response = await fetch(url, {
             method: 'GET',
@@ -130,7 +129,6 @@ class V1LeadClient {
         }
 
         const url = `${this.baseUrl}/sap/c4c/odata/v1/c4codataapi/LeadCollection?${queryParams}`;
-        console.log(`[V1LeadClient] Fetching leads after cursor: ${url}`);
 
         const response = await fetch(url, {
             method: 'GET',
@@ -145,10 +143,7 @@ class V1LeadClient {
         }
 
         const data = await response.json();
-        const leads = data.d?.results || [];
-        
-        console.log(`[V1LeadClient] Fetched ${leads.length} leads after cursor`);
-        return leads;
+        return data.d?.results || [];
     }
 
     /**
@@ -176,7 +171,6 @@ class V1LeadClient {
 
         const data = await response.json();
         const count = parseInt(data.d?.__count, 10);
-        console.log(`[V1LeadClient] Total leads in range: ${count}`);
         return isNaN(count) ? null : count;
     }
 
@@ -187,7 +181,6 @@ class V1LeadClient {
         // C4C OData API: LeadAttachmentFolder IS the attachment itself (not a folder containing files)
         // The Name property of the folder is the filename, and we download via $value
         const folderUrl = `${this.baseUrl}/sap/c4c/odata/v1/c4codataapi/LeadCollection('${leadObjectId}')/LeadAttachmentFolder?$format=json`;
-        console.log(`[V1LeadClient] Fetching attachments: ${folderUrl}`);
         
         const folderResponse = await fetch(folderUrl, {
             method: 'GET',
@@ -201,17 +194,9 @@ class V1LeadClient {
 
         const folderData = await folderResponse.json();
         const attachmentEntities = folderData.d?.results || [];
-        console.log(`[V1LeadClient] Found ${attachmentEntities.length} attachment(s) for lead ${leadObjectId}`);
-        
-        if (attachmentEntities.length === 0) {
-            console.log(`[V1LeadClient] Lead has no attachments`);
-            return [];
-        }
+        if (attachmentEntities.length === 0) return [];
 
-        // Log all properties of first attachment for debugging
-        if (attachmentEntities.length > 0) {
-            console.log(`[V1LeadClient] Attachment entity properties:`, JSON.stringify(attachmentEntities[0], null, 2));
-        }
+
 
         const allAttachments = [];
         
@@ -239,16 +224,30 @@ class V1LeadClient {
                 createdBy: att.CreatedBy
             };
             
-            if (isWebLink) {
-                console.log(`[V1LeadClient] → [LINK] ${attachment.name} → ${attachment.linkWebURI} (ObjectID: ${attachment.objectId})`);
-            } else {
-                console.log(`[V1LeadClient] → [FILE] ${attachment.name} (${attachment.mimeType}, ${attachment.sizeInBytes} bytes, ObjectID: ${attachment.objectId})`);
-            }
             allAttachments.push(attachment);
         }
         
-        console.log(`[V1LeadClient] Total attachments found: ${allAttachments.length}`);
         return allAttachments;
+    }
+
+    /**
+     * Find a V1 Lead by its displayId (ID field)
+     * @param {string} displayId - The Lead's display ID (e.g., "12345")
+     * @returns {Object|null} - The lead object with ObjectID, or null if not found
+     */
+    async findLeadByDisplayId(displayId) {
+        const leads = await this.fetchLeads({ leadId: displayId, maxRecords: 1 });
+        if (leads.length === 0) {
+            console.log(`[V1LeadClient] Lead not found by displayId: ${displayId}`);
+            return null;
+        }
+        const lead = leads[0];
+        return {
+            objectId: lead.ObjectID,
+            displayId: lead.ID,
+            name: lead.Name,
+            statusCode: lead.UserStatusCode
+        };
     }
 
     async downloadAttachment(attachmentObjectId, leadObjectId) {
@@ -259,7 +258,7 @@ class V1LeadClient {
         // LeadCollection('{LeadObjectID}')/LeadAttachmentFolder('{AttachmentObjectID}')/Binary/$value
         const url = `${this.baseUrl}/sap/c4c/odata/v1/c4codataapi/LeadCollection('${leadObjectId}')/LeadAttachmentFolder('${attachmentObjectId}')/Binary/$value`;
         
-        console.log(`[V1LeadClient] Downloading: ${url}`);
+
         const startTime = Date.now();
         
         const response = await fetch(url, { 
@@ -277,7 +276,7 @@ class V1LeadClient {
 
         const buffer = await response.arrayBuffer();
         const durationMs = Date.now() - startTime;
-        console.log(`[V1LeadClient] ✓ Downloaded: ${buffer.byteLength} bytes in ${durationMs}ms`);
+
         return { buffer: Buffer.from(buffer), durationMs };
     }
 }

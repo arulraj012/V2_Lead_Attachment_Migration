@@ -36,7 +36,6 @@ export function Dashboard() {
           <DashboardCards
             totalMigrated={status.totalMigrated}
             pendingFailed={status.pendingFailed}
-            pendingInQueue={status.pendingInQueue}
           />
         </div>
       </div>

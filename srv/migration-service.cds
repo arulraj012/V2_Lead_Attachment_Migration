@@ -153,12 +153,16 @@ service MigrationService {
      * Update batch configuration
      */
     action updateBatchConfig(
-        objectType          : String default 'LEAD_ATTACHMENT',
-        batchSize           : Integer,
-        maxRecordsPerRun    : Integer,
-        delayBetweenBatches : Integer,
-        delayBetweenRecords : Integer,
-        isActive            : Boolean
+        objectType             : String default 'LEAD_ATTACHMENT',
+        batchSize              : Integer,
+        maxRecordsPerRun       : Integer,
+        maxLeadsPerRun         : Integer default 50,
+        attachmentConcurrency  : Integer default 5,
+        delayBetweenBatches    : Integer,
+        delayBetweenRecords    : Integer,
+        delayBetweenLeads      : Integer,
+        delayBetweenAttachments: Integer,
+        isActive               : Boolean
     ) returns String;
 
     /**

@@ -31,10 +31,9 @@ function StatCard({ title, subtitle, value, color = "neutral" }: StatCardProps) 
 interface DashboardCardsProps {
   totalMigrated: number;
   pendingFailed: number;
-  pendingInQueue?: number;
 }
 
-export function DashboardCards({ totalMigrated, pendingFailed, pendingInQueue }: DashboardCardsProps) {
+export function DashboardCards({ totalMigrated, pendingFailed }: DashboardCardsProps) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "stretch", gap: "1rem", height: "100%" }}>
       <div style={{ flex: "1 1 200px", minWidth: "180px", display: "flex", flexDirection: "column" }}>
@@ -43,11 +42,6 @@ export function DashboardCards({ totalMigrated, pendingFailed, pendingInQueue }:
       <div style={{ flex: "1 1 200px", minWidth: "180px", display: "flex", flexDirection: "column" }}>
         <StatCard title="Pending Failed" subtitle="Awaiting retry" value={pendingFailed} color={pendingFailed > 0 ? "negative" : "positive"} />
       </div>
-      {pendingInQueue !== undefined && (
-        <div style={{ flex: "1 1 200px", minWidth: "180px", display: "flex", flexDirection: "column" }}>
-          <StatCard title="In Queue" subtitle="Pending migration" value={pendingInQueue} color="neutral" />
-        </div>
-      )}
     </div>
   );
 }

@@ -79,7 +79,7 @@ class CheckpointService {
      */
     async saveObjectSuccess(data) {
         await this.init();
-        await INSERT.into(this.entities.ObjectAuditLog).entries({
+        const entry = {
             ID: cds.utils.uuid(),
             objectType: data.objectType || 'LEAD_ATTACHMENT',
             v1ObjectID: data.v1ObjectID,
@@ -100,7 +100,14 @@ class CheckpointService {
             runId: data.runId,
             downloadDurationMs: data.downloadDurationMs,
             uploadDurationMs: data.uploadDurationMs
-        });
+        };
+        try {
+            await INSERT.into(this.entities.ObjectAuditLog).entries(entry);
+            console.log(`[CheckpointService] Audit log saved: ${data.fileName} (Lead: ${data.parentDisplayId}, V2: ${data.v2ObjectID})`);
+        } catch (err) {
+            console.error(`[CheckpointService] ERROR saving audit log: ${err.message}`, { fileName: data.fileName, parentDisplayId: data.parentDisplayId });
+            throw err;
+        }
     }
 
     /**
@@ -173,6 +180,28 @@ class CheckpointService {
         });
     }
 
+    /**
+     * Save skipped attachment to ObjectAuditLog (for tracking/visibility)
+     * Records attachments that were skipped due to duplicate detection
+     */
+    async saveLeadAttachmentSkipped(data) {
+        return this.saveObjectSuccess({
+            objectType: 'LEAD_ATTACHMENT',
+            v1ObjectID: data.v1AttachmentID,
+            v1DisplayId: data.v1AttachmentID,
+            v2ObjectID: null, // No V2 object created
+            // Use parentDisplayId (same in V1 and V2, preserved by DTT)
+            parentDisplayId: data.parentDisplayId,
+            parentV2ObjectID: data.parentV2ObjectID,
+            fileName: data.attachmentName,
+            fileSize: data.attachmentSize,
+            mimeType: data.mimeType,
+            migrationMode: 'SKIPPED', // Special mode to indicate skipped
+            recordSource: data.skipReason || 'EXISTS_IN_V2', // Reason for skipping
+            runId: data.runId
+        });
+    }
+
     async getCheckpoint(objectType = DEFAULT_OBJECT_TYPE) {
         await this.init();
         return await SELECT.one.from(this.entities.Checkpoint).where({ objectType });
@@ -222,9 +251,9 @@ class CheckpointService {
             const updates = { modifiedAt: new Date() };
             if (data.parentV2ObjectID !== undefined) updates.parentV2ObjectID = data.parentV2ObjectID;
             if (data.v2Validated !== undefined) updates.v2Validated = data.v2Validated;
-            if (data.attachmentsMigrated !== undefined) updates.attachmentsMigrated = data.attachmentsMigrated;
-            if (data.attachmentsPending !== undefined) updates.attachmentsPending = data.attachmentsPending;
-            if (data.attachmentsFailed !== undefined) updates.attachmentsFailed = data.attachmentsFailed;
+            if (data.migrated !== undefined) updates.migrated = data.migrated;
+            if (data.pending !== undefined) updates.pending = data.pending;
+            if (data.failed !== undefined) updates.failed = data.failed;
             if (data.lastProcessedAt !== undefined) updates.lastProcessedAt = data.lastProcessedAt;
             
             await UPDATE(this.entities.ParentMigrationStatus)
@@ -236,9 +265,9 @@ class CheckpointService {
                 parentDisplayId: data.parentDisplayId,
                 parentV2ObjectID: data.parentV2ObjectID,
                 v2Validated: data.v2Validated ?? false,
-                attachmentsMigrated: data.attachmentsMigrated || 0,
-                attachmentsPending: data.attachmentsPending || 0,
-                attachmentsFailed: data.attachmentsFailed || 0,
+                migrated: data.migrated || 0,
+                pending: data.pending || 0,
+                failed: data.failed || 0,
                 lastProcessedAt: data.lastProcessedAt
             });
         }
@@ -254,8 +283,8 @@ class CheckpointService {
         if (existing) {
             await UPDATE(this.entities.ParentMigrationStatus)
                 .set({
-                    attachmentsMigrated: (existing.attachmentsMigrated || 0) + migrated,
-                    attachmentsFailed: (existing.attachmentsFailed || 0) + failed,
+                    migrated: (existing.migrated || 0) + migrated,
+                    failed: (existing.failed || 0) + failed,
                     lastProcessedAt: new Date(),
                     modifiedAt: new Date()
                 })
@@ -266,6 +295,43 @@ class CheckpointService {
     async getBatchConfig(objectType = DEFAULT_OBJECT_TYPE) {
         await this.init();
         return await SELECT.one.from(this.entities.BatchConfig).where({ objectType });
+    }
+
+    /**
+     * Update or insert batch configuration to database
+     * @param {string} objectType - e.g., LEAD_ATTACHMENT
+     * @param {Object} config - Configuration values to persist
+     */
+    async updateBatchConfig(objectType = DEFAULT_OBJECT_TYPE, config = {}) {
+        await this.init();
+        const existing = await SELECT.one.from(this.entities.BatchConfig).where({ objectType });
+        
+        // BatchConfig only stores configuration settings (not run filters)
+        const data = {
+            objectType,
+            batchSize: config.batchSize,
+            maxRecordsPerRun: config.maxRecordsPerRun,
+            maxLeadsPerRun: config.maxLeadsPerRun,
+            attachmentConcurrency: config.attachmentConcurrency,
+            delayBetweenBatches: config.delayBetweenBatches,
+            delayBetweenRecords: config.delayBetweenRecords,
+            delayBetweenLeads: config.delayBetweenLeads,
+            delayBetweenAttachments: config.delayBetweenAttachments,
+            isActive: config.isActive
+        };
+
+        // Remove undefined values
+        Object.keys(data).forEach(key => data[key] === undefined && delete data[key]);
+
+        if (existing) {
+            await UPDATE(this.entities.BatchConfig).set(data).where({ objectType });
+            console.log(`[CheckpointService] BatchConfig updated for ${objectType}`);
+        } else {
+            await INSERT.into(this.entities.BatchConfig).entries(data);
+            console.log(`[CheckpointService] BatchConfig created for ${objectType}`);
+        }
+
+        return await this.getBatchConfig(objectType);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -407,13 +473,13 @@ class CheckpointService {
         else await INSERT.into(this.entities.ParentMigrationStatus).entries(data);
     }
 
-    /** Mark a lead as completed with attachment counts */
+    /** Mark a lead as completed with counts */
     async markLeadCompleted(objectType, leadId, { v2LeadId, migrated, failed, skipped, total }) {
         await this.init();
         await UPDATE(this.entities.ParentMigrationStatus).set({
             status: 'COMPLETED', parentV2ObjectID: v2LeadId, v2Validated: true,
-            attachmentsMigrated: migrated || 0, attachmentsFailed: failed || 0,
-            attachmentsSkipped: skipped || 0, totalAttachments: total || 0, lastProcessedAt: new Date()
+            migrated: migrated || 0, failed: failed || 0,
+            skipped: skipped || 0, total: total || 0, lastProcessedAt: new Date()
         }).where({ objectType, parentDisplayId: leadId });
     }
 
